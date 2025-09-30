@@ -197,17 +197,19 @@ if __name__ == "__main__":
 
     inference_steps = 25
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
     pipe = StableDiffusionKDiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2-1-base")
-    pipe = pipe.to("cuda")
+    pipe = pipe.to(device)
 
     k_diffusion_model = CompVisDenoiser(model)
 
     pipe = DiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4", custom_pipeline="sd_text2img_k_diffusion")
-    pipe = pipe.to("cuda")
+    pipe = pipe.to(device)
 
     prompt = "an astronaut riding a horse on mars"
     pipe.set_scheduler("sample_heun")
-    generator = torch.Generator(device="cuda").manual_seed(seed)
+    generator = torch.Generator(device=device).manual_seed(seed)
     image = pipe(prompt, generator=generator, num_inference_steps=20).images[0]
 
     image.save("./astronaut_heun_k_diffusion.png")

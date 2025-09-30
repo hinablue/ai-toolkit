@@ -304,7 +304,7 @@ def apply_rotary_emb(x, cos, sin):
 
 class DiT(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin):  # type: ignore[misc]
     _supports_gradient_checkpointing = True
-    
+
     @register_to_config
     def __init__(
         self,
@@ -435,6 +435,10 @@ class DiT(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin):  #
 
 
 if __name__ == "__main__":
+    # Auto-detect the best available device
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"Using device: {device}")
+
     model = DiT(
         in_channels=4,
         patch_size=2,
@@ -446,11 +450,11 @@ if __name__ == "__main__":
         residual_v=False,
         train_bias_and_rms=True,
         use_rope=True,
-    ).cuda()
+    ).to(device)
     print(
         model(
-            torch.randn(1, 4, 64, 64).cuda(),
-            torch.randn(1, 37, 128).cuda(),
-            torch.tensor([1.0]).cuda(),
+            torch.randn(1, 4, 64, 64).to(device),
+            torch.randn(1, 37, 128).to(device),
+            torch.tensor([1.0]).to(device),
         )
     )

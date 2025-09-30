@@ -8,7 +8,7 @@ class ReductionKernel(nn.Module):
     # Tensorflow
     def __init__(self, in_channels, kernel_size=2, dtype=torch.float32, device=None):
         if device is None:
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         super(ReductionKernel, self).__init__()
         self.kernel_size = kernel_size
         self.in_channels = in_channels

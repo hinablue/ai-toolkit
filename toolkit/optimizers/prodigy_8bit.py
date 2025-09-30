@@ -36,7 +36,7 @@ class Prodigy8bit(Optimizer):
             Initial D estimate for D-adaptation (default 1e-6). Rarely needs changing.
         d_coef (float):
             Coefficient in the expression for the estimate of d (default 1.0).
-            Values such as 0.5 and 2.0 typically work as well. 
+            Values such as 0.5 and 2.0 typically work as well.
             Changing this parameter is the preferred way to tune the method.
         growth_rate (float):
             prevent the D estimate from growing faster than this multiplicative rate.
@@ -230,7 +230,12 @@ class Prodigy8bit(Optimizer):
 
         if lr > 0.0:
             if fsdp_in_use:
-                dist_tensor = torch.zeros(2).cuda()
+                if torch.cuda.is_available():
+                    dist_tensor = torch.zeros(2).cuda()
+                elif torch.backends.mps.is_available():
+                    dist_tensor = torch.zeros(2).mps()
+                else:
+                    dist_tensor = torch.zeros(2).cpu()
                 dist_tensor[0] = d_numerator
                 dist_tensor[1] = d_denom
                 dist.all_reduce(dist_tensor, op=dist.ReduceOp.SUM)

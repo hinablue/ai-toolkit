@@ -109,7 +109,10 @@ def get_noise_from_latents(latents):
     noise = []
     for seed in seed_list:
         torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+        if torch.backends.mps.is_available():
+            torch.mps.manual_seed(seed)
         noise.append(torch.randn_like(latents[0]))
     return torch.stack(noise)
 
@@ -658,7 +661,7 @@ class LearnableSNRGamma:
     This is a trainer for learnable snr gamma
     It will adapt to the dataset and attempt to adjust the snr multiplier to balance the loss over the timesteps
     """
-    def __init__(self, noise_scheduler: Union['DDPMScheduler'], device='cuda'):
+    def __init__(self, noise_scheduler: Union['DDPMScheduler'], device='cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'):
         self.device = device
         self.noise_scheduler: Union['DDPMScheduler'] = noise_scheduler
         self.offset_1 = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float32, device=device))

@@ -286,21 +286,27 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
     def get_orig_weight(self):
         weight = self.org_module[0].weight
-        if isinstance(weight, QTensor) or isinstance(weight, QBytesTensor):
+        # Handle different quantized tensor types
+        from torchao.dtypes.affine_quantized_tensor import AffineQuantizedTensor
+        if isinstance(weight, QTensor) or isinstance(weight, QBytesTensor) or isinstance(weight, AffineQuantizedTensor):
             return weight.dequantize().data.detach()
         else:
             return weight.data.detach()
 
     def get_orig_bias(self):
         if hasattr(self.org_module[0], 'bias') and self.org_module[0].bias is not None:
-            if isinstance(self.org_module[0].bias, QTensor) or isinstance(self.org_module[0].bias, QBytesTensor):
+            # Handle different quantized tensor types
+            from torchao.dtypes.affine_quantized_tensor import AffineQuantizedTensor
+            if isinstance(self.org_module[0].bias, QTensor) or isinstance(self.org_module[0].bias, QBytesTensor) or isinstance(self.org_module[0].bias, AffineQuantizedTensor):
                 return self.org_module[0].bias.dequantize().data.detach()
             else:
                 return self.org_module[0].bias.data.detach()
         return None
 
     def _call_forward(self, x):
-        if isinstance(x, QTensor) or isinstance(x, QBytesTensor):
+        # Handle different quantized tensor types
+        from torchao.dtypes.affine_quantized_tensor import AffineQuantizedTensor
+        if isinstance(x, QTensor) or isinstance(x, QBytesTensor) or isinstance(x, AffineQuantizedTensor):
             x = x.dequantize()
 
         orig_dtype = x.dtype

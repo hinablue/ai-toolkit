@@ -11,7 +11,7 @@ def generate_random_mask(
     batch_size,
     height=256,
     width=256,
-    device='cuda',
+    device='cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu',
     min_coverage=0.2,
     max_coverage=0.8,
     num_blobs_range=(1, 3)
@@ -199,58 +199,58 @@ def save_masks_as_images(masks, suffix="", output_dir="output"):
 def random_dialate_mask(mask, max_percent=0.05):
     """
     Randomly dialates a binary mask with a kernel of random size.
-    
+
     Args:
         mask (torch.Tensor): Input mask of shape [batch_size, channels, height, width]
         max_percent (float): Maximum kernel size as a percentage of the mask size
-        
+
     Returns:
         torch.Tensor: Dialated mask with the same shape as input
     """
-    
+
     size = mask.shape[-1]
     max_size = int(size * max_percent)
-    
+
     # Handle case where max_size is too small
     if max_size < 3:
         max_size = 3
-    
+
     batch_chunks = torch.chunk(mask, mask.shape[0], dim=0)
     out_chunks = []
-    
+
     for i in range(len(batch_chunks)):
         chunk = batch_chunks[i]
-        
+
         # Ensure kernel size is odd for proper padding
         kernel_size = np.random.randint(1, max_size)
-        
+
         # If kernel_size is less than 2, keep the original mask
         if kernel_size < 2:
             out_chunks.append(chunk)
             continue
-            
+
         # Make sure kernel size is odd
         if kernel_size % 2 == 0:
             kernel_size += 1
-        
+
         # Create normalized dilation kernel
         kernel = torch.ones((1, 1, kernel_size, kernel_size), device=mask.device) / (kernel_size * kernel_size)
-        
+
         # Pad the mask for convolution
         padding = kernel_size // 2
         padded_mask = F.pad(chunk, (padding, padding, padding, padding), mode='constant', value=0)
-        
+
         # Apply convolution
         dilated = F.conv2d(padded_mask, kernel)
-        
+
         # Random threshold for varied dilation effect
         threshold = np.random.uniform(0.2, 0.8)
-        
+
         # Apply threshold
         dilated = (dilated > threshold).float()
-        
+
         out_chunks.append(dilated)
-    
+
     return torch.cat(out_chunks, dim=0)
 
 
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     batch_size = 20
     height = 256
     width = 256
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 
     print(f"Generating {batch_size} random blob masks on {device}...")
 

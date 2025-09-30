@@ -24,7 +24,10 @@ from diffusers.utils import load_image
 
 
 def flush():
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
     gc.collect()
 
 
@@ -55,7 +58,10 @@ class ReferenceGenerator(BaseExtensionProcess):
     def __init__(self, process_id: int, job, config: OrderedDict):
         super().__init__(process_id, job, config)
         self.output_folder = self.get_conf('output_folder', required=True)
-        self.device = self.get_conf('device', 'cuda')
+        if torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_config = ModelConfig(**self.get_conf('model', required=True))
         self.generate_config = GenerateConfig(**self.get_conf('generate', required=True))
         self.is_latents_cached = True
@@ -175,7 +181,10 @@ class ReferenceGenerator(BaseExtensionProcess):
                 seed = random.randint(0, 1000000)
 
             torch.manual_seed(seed)
-            torch.cuda.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(seed)
+            if torch.backends.mps.is_available():
+                torch.mps.manual_seed(seed)
 
             # generate depth map
             image = midas_depth(
@@ -209,4 +218,7 @@ class ReferenceGenerator(BaseExtensionProcess):
         # cleanup
         del self.sd
         gc.collect()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()

@@ -18,7 +18,10 @@ from .BaseSDTrainProcess import BaseSDTrainProcess, StableDiffusion
 
 
 def flush():
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
     gc.collect()
 
 
@@ -109,6 +112,7 @@ class TrainSDRescaleProcess(BaseSDTrainProcess):
             # save current seed state for training
             rng_state = torch.get_rng_state()
             cuda_rng_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+            mps_rng_state = torch.mps.get_rng_state() if torch.backend.mps.is_available() else None
 
             text_embeddings = train_tools.concat_prompt_embeddings(
                 self.empty_embedding,  # unconditional (negative prompt)
@@ -127,6 +131,8 @@ class TrainSDRescaleProcess(BaseSDTrainProcess):
                 torch.manual_seed(seed)
                 if torch.cuda.is_available():
                     torch.cuda.manual_seed(seed)
+                if torch.backends.mps.is_available():
+                    torch.mps.manual_seed(seed)
 
                 # # ger a random number of steps
                 timesteps_to = self.train_config.max_denoising_steps
@@ -182,6 +188,8 @@ class TrainSDRescaleProcess(BaseSDTrainProcess):
             torch.set_rng_state(rng_state)
             if cuda_rng_state is not None:
                 torch.cuda.set_rng_state(cuda_rng_state)
+            if mps_rng_state is not None:
+                torch.mps.set_rng_state(mps_rng_state)
             self.sd.unet.to(self.device_torch, dtype=dtype)
 
     def hook_before_train_loop(self):

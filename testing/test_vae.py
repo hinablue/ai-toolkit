@@ -10,7 +10,7 @@ import lpips
 from tqdm import tqdm
 from torchvision import transforms
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
 def load_images(folder_path):
     images = []
@@ -30,7 +30,7 @@ def paramiter_count(model):
 
 
 def calculate_metrics(vae, images, max_imgs=-1, save_output=False):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     vae = vae.to(device)
     lpips_model = lpips.LPIPS(net='alex').to(device)
 
@@ -44,7 +44,7 @@ def calculate_metrics(vae, images, max_imgs=-1, save_output=False):
     # ])
     # needs values between -1 and 1
     to_tensor = ToTensor()
-    
+
     # remove _reconstructed.png files
     images = [img for img in images if not img.endswith("_reconstructed.png")]
 
@@ -85,7 +85,7 @@ def calculate_metrics(vae, images, max_imgs=-1, save_output=False):
     avg_rfid = 0
     avg_psnr = sum(psnr_scores) / len(psnr_scores)
     avg_lpips = sum(lpips_scores) / len(lpips_scores)
-    
+
     if save_output:
         filename_no_ext = os.path.splitext(os.path.basename(img_path))[0]
         folder = os.path.dirname(img_path)

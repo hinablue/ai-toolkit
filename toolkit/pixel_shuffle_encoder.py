@@ -62,14 +62,14 @@ class AutoencoderPixelMixer(nn.Module):
         self.mixer = PixelMixer(in_channels, downscale_factor)
         self._dtype = torch.float32
         self._device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+            "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         self.config = Config()
-        
+
         if downscale_factor == 8:
             # we go by len of block out channels in code, so simulate it
             self.config.block_out_channels = (1, 1, 1, 1)
             self.config.latent_channels = 192
-        
+
         elif downscale_factor == 16:
             # we go by len of block out channels in code, so simulate it
             self.config.block_out_channels = (1, 1, 1, 1, 1)
@@ -189,7 +189,7 @@ if __name__ == '__main__':
     from PIL import Image
     import torchvision.transforms as transforms
     user_path = os.path.expanduser('~')
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float32
 
     input_path = os.path.join(user_path, "Pictures/test/test.jpg")

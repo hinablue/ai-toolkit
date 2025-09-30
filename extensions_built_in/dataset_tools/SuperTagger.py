@@ -20,7 +20,10 @@ img_ext = ['.jpg', '.jpeg', '.png', '.webp']
 
 
 def flush():
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
     gc.collect()
 
 
@@ -33,7 +36,10 @@ class SuperTagger(BaseExtensionProcess):
         super().__init__(process_id, job, config)
         parent_dir = config.get('parent_dir', None)
         self.dataset_paths: list[str] = config.get('dataset_paths', [])
-        self.device = config.get('device', 'cuda')
+        if torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.steps: list[Step] = config.get('steps', [])
         self.caption_method = config.get('caption_method', 'llava:default')
         self.caption_prompt = config.get('caption_prompt', default_long_prompt)

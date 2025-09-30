@@ -31,7 +31,11 @@ if hasattr(torch.amp, "custom_fwd"): # type: ignore[attr-defined]
     from torch.amp import custom_fwd, custom_bwd # type: ignore[attr-defined]
 else:
     deprecated = False
-    from torch.cuda.amp import custom_fwd, custom_bwd
+
+    if torch.cuda.is_available():
+        from torch.cuda.amp import custom_fwd, custom_bwd
+    else:
+        from torch.amp import custom_fwd, custom_bwd
 
 custom_fwd = custom_amp_decorator(custom_fwd, deprecated)
 custom_bwd = custom_amp_decorator(custom_bwd, deprecated)
@@ -42,8 +46,18 @@ def triton_autotune_configs():
     configs=[]
     # Maximum threads per block is architecture-dependent in theory, but in reality all are 1024
     max_threads_per_block=1024
-    # Default to warp size 32 if not defined by device
-    warp_size=getattr(torch.cuda.get_device_properties(torch.cuda.current_device()), "warp_size", 32)
+
+    # Check if CUDA is available and get warp size
+    if torch.cuda.is_available():
+        try:
+            warp_size=getattr(torch.cuda.get_device_properties(torch.cuda.current_device()), "warp_size", 32)
+        except Exception:
+            # Fallback to default warp size if CUDA properties are not accessible
+            warp_size = 32
+    else:
+        # Default to warp size 32 for non-CUDA devices (this is standard for most architectures)
+        warp_size = 32
+
     # Autotune for warp counts which are powers of 2 and do not exceed thread per block limit
     warp_count=1
     while warp_count*warp_size <= max_threads_per_block:
@@ -383,7 +397,48 @@ def _layer_norm_fwd(
     BLOCK_N = min(MAX_FUSED_SIZE, triton.next_power_of_2(N))
     if N > BLOCK_N:
         raise RuntimeError("This layer norm doesn't support feature dim >= 64KB.")
-    with torch.cuda.device(x.device.index):
+
+    # Use device context only if CUDA device, otherwise run directly
+    if x.device.type == 'cuda':
+        with torch.cuda.device(x.device.index):
+            _layer_norm_fwd_1pass_kernel[(M,)](
+            x,
+            out,
+            weight,
+            bias,
+            residual,
+            x1,
+            weight1,
+            bias1,
+            y1,
+            residual_out,
+            rowscale,
+            seeds,
+            dropout_mask,
+            mean,
+            rstd,
+            x.stride(0),
+            out.stride(0),
+            residual.stride(0) if residual is not None else 0,
+            residual_out.stride(0) if residual_out is not None else 0,
+            x1.stride(0) if x1 is not None else 0,
+            y1.stride(0) if y1 is not None else 0,
+            M,
+            N,
+            eps,
+            dropout_p,
+            zero_centered_weight,
+            is_rms_norm,
+            BLOCK_N,
+            residual is not None,
+            residual_out is not None,
+            bias is not None,
+            dropout_p > 0.0,
+            dropout_mask is not None,
+            rowscale is not None,
+        )
+    else:
+        # For non-CUDA devices, run without device context
         _layer_norm_fwd_1pass_kernel[(M,)](
             x,
             out,
@@ -682,7 +737,11 @@ def _layer_norm_bwd(
         raise RuntimeError("This layer norm doesn't support feature dim >= 64KB.")
     # Increasing the multiple (e.g. 8) will allow more thread blocks to be launched and hide the
     # latency of the gmem reads/writes, but will increase the time of summing up dw / db.
-    sm_count = torch.cuda.get_device_properties(x.device).multi_processor_count * 8
+    if x.device.type == 'cuda':
+        sm_count = torch.cuda.get_device_properties(x.device).multi_processor_count * 8
+    else:
+        # Default SM count for non-CUDA devices (fallback value)
+        sm_count = 8 * 8  # Reasonable default for most devices
     _dw = torch.empty((sm_count, N), dtype=torch.float32, device=weight.device)
     _db = (
         torch.empty((sm_count, N), dtype=torch.float32, device=bias.device)
@@ -693,7 +752,53 @@ def _layer_norm_bwd(
     _db1 = torch.empty_like(_db) if bias1 is not None else None
     rows_per_program = math.ceil(M / sm_count)
     grid = (sm_count,)
-    with torch.cuda.device(x.device.index):
+
+    # Use device context only if CUDA device, otherwise run directly
+    if x.device.type == 'cuda':
+        with torch.cuda.device(x.device.index):
+            _layer_norm_bwd_kernel[grid](
+            x,
+            weight,
+            bias,
+            y,
+            dy,
+            dx,
+            _dw,
+            _db,
+            dresidual,
+            weight1,
+            dy1,
+            dx1,
+            _dw1,
+            _db1,
+            dresidual_in,
+            rowscale,
+            seeds,
+            mean,
+            rstd,
+            x.stride(0),
+            0 if not recompute_output else y.stride(0),
+            dy.stride(0),
+            dx.stride(0),
+            dresidual.stride(0) if dresidual is not None else 0,
+            dy1.stride(0) if dy1 is not None else 0,
+            dx1.stride(0) if dx1 is not None else 0,
+            dresidual_in.stride(0) if dresidual_in is not None else 0,
+            M,
+            N,
+            eps,
+            dropout_p,
+            zero_centered_weight,
+            rows_per_program,
+            is_rms_norm,
+            BLOCK_N,
+            dresidual is not None,
+            dresidual_in is not None,
+            bias is not None,
+            dropout_p > 0.0,
+        )
+    else:
+        # For non-CUDA devices, run without device context
         _layer_norm_bwd_kernel[grid](
             x,
             weight,
@@ -806,12 +911,12 @@ class LayerNormFn(torch.autograd.Function):
             # Handle output tensors with correct dtype
             y = x  # Preserve input tensor properties
             y1 = torch.empty_like(x) if x1 is not None else None
-            
+
             # Only create residual_out if prenorm is True
-            residual_out = torch.empty(x.shape, 
+            residual_out = torch.empty(x.shape,
                                     dtype=torch.float32 if residual_in_fp32 else x.dtype,
                                     device=x.device) if prenorm else None
-            
+
             # Handle dropout masks
             dropout_mask = None
             dropout_mask1 = None
@@ -828,13 +933,13 @@ class LayerNormFn(torch.autograd.Function):
                     return (y, y1) if not prenorm else (y, y1, residual_out)
             else:
                 if weight1 is None:
-                    return ((y, dropout_mask, dropout_mask1) if not prenorm 
+                    return ((y, dropout_mask, dropout_mask1) if not prenorm
                         else (y, residual_out, dropout_mask, dropout_mask1))
                 else:
-                    return ((y, y1, dropout_mask, dropout_mask1) if not prenorm 
+                    return ((y, y1, dropout_mask, dropout_mask1) if not prenorm
                         else (y, y1, residual_out, dropout_mask, dropout_mask1))
 
-        ctx.zero_seq_length = False  
+        ctx.zero_seq_length = False
         # reshape input data into 2D tensor
         x = x.reshape(-1, x.shape[-1])
         if x.stride(-1) != 1:
@@ -944,7 +1049,7 @@ class LayerNormFn(torch.autograd.Function):
                 None,
                 None,
             )
-        
+
         x, weight, bias, weight1, bias1, rowscale, seeds, mean, rstd = ctx.saved_tensors
         dy = dy.reshape(-1, dy.shape[-1])
         if dy.stride(-1) != 1:
@@ -966,7 +1071,7 @@ class LayerNormFn(torch.autograd.Function):
             assert dresidual.shape == x.shape
         else:
             dresidual = None
-        
+
         dx, dw, db, dresidual_in, dx1, dw1, db1 = _layer_norm_bwd(
             dy,
             x,

@@ -14,7 +14,7 @@ def tensor_size(tensor):
 
 class ContentLoss(nn.Module):
 
-    def __init__(self, single_target=False, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, single_target=False, device='cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'):
         super(ContentLoss, self).__init__()
         self.single_target = single_target
         self.device = device
@@ -74,7 +74,7 @@ def convert_to_gram_matrix(inputs):
 
 class StyleLoss(nn.Module):
 
-    def __init__(self, single_target=False, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, single_target=False, device='cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'):
         super(StyleLoss, self).__init__()
         self.single_target = single_target
         self.device = device
@@ -152,7 +152,7 @@ class OutputLayer(nn.Module):
 
 def get_style_model_and_losses(
         single_target=True,  # false has 3 targets, dont remember why i added this initially, this is old code
-        device='cuda' if torch.cuda.is_available() else 'cpu',
+        device='cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu',
         output_layer_name=None,
         dtype=torch.float32
 ):

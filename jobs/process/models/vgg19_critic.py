@@ -57,8 +57,12 @@ class Vgg19Critic(nn.Module):
 
     def forward(self, inputs):
         # return self.main(inputs)
-        with torch.cuda.amp.autocast(False):
-            return self.main(inputs.float())
+        if torch.cuda.is_available():
+            with torch.cuda.amp.autocast(False):
+                return self.main(inputs.float())
+        else:
+            with torch.amp.autocast(False):
+                return self.main(inputs.float())
 
 
 if TYPE_CHECKING:
@@ -184,7 +188,7 @@ class Critic:
 
         # # Compute WGAN-GP critic loss
         # critic_loss = -(torch.mean(out_target) - torch.mean(out_pred)) + self.lambda_gp * gradient_penalty
-        
+
         stacked_output = self.model(inputs).float()
         out_pred, out_target = torch.chunk(stacked_output, 2, dim=0)
 
@@ -196,7 +200,7 @@ class Critic:
         gradient_penalty = get_gradient_penalty(self.model, vgg_target, vgg_pred, self.device)
 
         critic_loss = loss_real + loss_fake + self.lambda_gp * gradient_penalty
-        
+
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
         self.optimizer.step()

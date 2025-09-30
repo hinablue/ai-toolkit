@@ -209,6 +209,8 @@ def extract_diff(
     del base_unet, db_unet
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
     all_lora_name = set()
     for k in all_loras:
@@ -231,7 +233,7 @@ output_dict = extract_diff(
     mode="fixed",
     linear_mode_param=dim,
     conv_mode_param=dim,
-    extract_device="cuda",
+    extract_device="cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
     use_bias=False,
     sparsity=0.98,
     small_conv=False,

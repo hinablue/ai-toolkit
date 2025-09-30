@@ -12,7 +12,10 @@ from toolkit.train_tools import get_torch_dtype
 
 
 def flush():
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
     gc.collect()
 
 
@@ -21,7 +24,10 @@ class PureLoraGenerator(BaseExtensionProcess):
     def __init__(self, process_id: int, job, config: OrderedDict):
         super().__init__(process_id, job, config)
         self.output_folder = self.get_conf('output_folder', required=True)
-        self.device = self.get_conf('device', 'cuda')
+        if torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device_torch = torch.device(self.device)
         self.model_config = ModelConfig(**self.get_conf('model', required=True))
         self.generate_config = SampleConfig(**self.get_conf('sample', required=True))
@@ -99,4 +105,7 @@ class PureLoraGenerator(BaseExtensionProcess):
             # cleanup
             del self.sd
             gc.collect()
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()

@@ -61,7 +61,7 @@ class LLaVAImageProcessor:
         conv_mode = "llava_v0"
         conv = conv_templates[conv_mode].copy()
         roles = conv.roles
-        image_tensor = self.image_processor.preprocess([image], return_tensors='pt')['pixel_values'].half().cuda()
+        image_tensor = self.image_processor.preprocess([image], return_tensors='pt')['pixel_values'].half().to(self.device)
 
         inp = f"{roles[0]}: {prompt}"
         inp = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + inp
@@ -69,7 +69,7 @@ class LLaVAImageProcessor:
         conv.append_message(conv.roles[1], None)
         raw_prompt = conv.get_prompt()
         input_ids = tokenizer_image_token(raw_prompt, self.tokenizer, IMAGE_TOKEN_INDEX,
-                                          return_tensors='pt').unsqueeze(0).cuda()
+                                          return_tensors='pt').unsqueeze(0).to(self.device)
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
         keywords = [stop_str]
         stopping_criteria = KeywordsStoppingCriteria(keywords, self.tokenizer, input_ids)

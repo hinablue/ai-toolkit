@@ -91,8 +91,12 @@ class CriticModel(nn.Module):
 
     def forward(self, inputs):
         # force full-precision inside AMP ctx for stability
-        with torch.cuda.amp.autocast(False):
-            return self.main(inputs.float())
+        if torch.cuda.is_available():
+            with torch.cuda.amp.autocast(False):
+                return self.main(inputs.float())
+        else:
+            with torch.amp.autocast(False):
+                return self.main(inputs.float())
 
 
 if TYPE_CHECKING:
@@ -220,7 +224,7 @@ class Critic:
 
         return float(np.mean(critic_losses))
 
-    def get_lr(self):    
+    def get_lr(self):
         if hasattr(self.optimizer, 'get_avg_learning_rate'):
             learning_rate = self.optimizer.get_avg_learning_rate()
         elif self.optimizer_type.startswith('dadaptation') or \

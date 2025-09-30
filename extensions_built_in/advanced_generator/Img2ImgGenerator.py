@@ -27,7 +27,10 @@ from torchvision.transforms import ToTensor
 
 
 def flush():
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
     gc.collect()
 
 
@@ -56,7 +59,10 @@ class Img2ImgGenerator(BaseExtensionProcess):
         super().__init__(process_id, job, config)
         self.output_folder = self.get_conf('output_folder', required=True)
         self.copy_inputs_to = self.get_conf('copy_inputs_to', None)
-        self.device = self.get_conf('device', 'cuda')
+        if torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_config = ModelConfig(**self.get_conf('model', required=True))
         self.generate_config = GenerateConfig(**self.get_conf('generate', required=True))
         self.is_latents_cached = True
@@ -253,4 +259,8 @@ class Img2ImgGenerator(BaseExtensionProcess):
             # cleanup
             del self.sd
             gc.collect()
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+
