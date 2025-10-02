@@ -32,51 +32,24 @@ MOUNT_DIR = "/root/ai-toolkit/modal_output"  # modal_output, due to "cannot moun
 image = (
     modal.Image.debian_slim(python_version="3.11")
     # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
-    .apt_install("libgl1", "libglib2.0-0")
+    .apt_install("libgl1", "libglib2.0-0", "git")
     .pip_install(
-        "python-dotenv",
-        "torch", 
-        "diffusers[torch]", 
-        "transformers", 
-        "ftfy", 
-        "torchvision", 
-        "oyaml", 
-        "opencv-python", 
-        "albumentations",
-        "safetensors",
-        "lycoris-lora==1.8.3",
-        "flatten_json",
-        "pyyaml",
-        "tensorboard", 
-        "kornia", 
-        "invisible-watermark", 
-        "einops", 
-        "accelerate", 
-        "toml", 
-        "pydantic",
-        "omegaconf",
-        "k-diffusion",
-        "open_clip_torch",
-        "timm",
-        "prodigyopt",
-        "controlnet_aux==0.0.7",
-        "bitsandbytes",
-        "hf_transfer",
-        "lpips", 
-        "pytorch_fid", 
-        "optimum-quanto", 
-        "sentencepiece", 
-        "huggingface_hub", 
-        "peft"
+        "torch==2.7.0",
+        "torchvision==0.22.0",
+        "torchaudio==2.7.0",
+        index_url="https://download.pytorch.org/whl/cu126"
+    )
+    .pip_install_from_requirements(
+        "/Volumes/HinaDisk/ai-toolkit/requirements.txt"
     )
 )
 
 # mount for the entire ai-toolkit directory
 # example: "/Users/username/ai-toolkit" is the local directory, "/root/ai-toolkit" is the remote directory
-code_mount = modal.Mount.from_local_dir("/Users/username/ai-toolkit", remote_path="/root/ai-toolkit")
+image = image.add_local_dir("/Users/username/ai-toolkit", "/root/ai-toolkit")
 
 # create the Modal app with the necessary mounts and volumes
-app = modal.App(name="flux-lora-training", image=image, mounts=[code_mount], volumes={MOUNT_DIR: model_volume})
+app = modal.App(name="flux-lora-training", image=image, volumes={MOUNT_DIR: model_volume})
 
 # Check if we have DEBUG_TOOLKIT in env
 if os.environ.get("DEBUG_TOOLKIT", "0") == "1":
@@ -106,7 +79,9 @@ def print_end_message(jobs_completed, jobs_failed):
     # more about modal GPU's: https://modal.com/docs/guide/gpu
     gpu="A100", # gpu="H100"
     # more about modal timeouts: https://modal.com/docs/guide/timeouts
-    timeout=7200  # 2 hours, increase or decrease if needed
+    timeout=7200,  # 2 hours, increase or decrease if needed
+    # Add your huggingface read token: https://modal.com/docs/guide/secrets
+    secrets=[modal.Secret.from_name("huggingface-secret")],
 )
 def main(config_file_list_str: str, recover: bool = False, name: str = None):
     # convert the config file list from a string to a list
@@ -120,17 +95,17 @@ def main(config_file_list_str: str, recover: bool = False, name: str = None):
     for config_file in config_file_list:
         try:
             job = get_job(config_file, name)
-            
+
             job.config['process'][0]['training_folder'] = MOUNT_DIR
             os.makedirs(MOUNT_DIR, exist_ok=True)
             print(f"Training outputs will be saved to: {MOUNT_DIR}")
-            
+
             # run the job
             job.run()
-            
+
             # commit the volume after training
             model_volume.commit()
-            
+
             job.cleanup()
             jobs_completed += 1
         except Exception as e:
