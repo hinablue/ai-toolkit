@@ -97,6 +97,9 @@ def get_optimizer(
     elif lower_type == 'automagic':
         from toolkit.optimizers.automagic import Automagic
         optimizer = Automagic(params, lr=float(learning_rate), **optimizer_params)
+    elif lower_type == 'automagic_sinkgd':
+        from toolkit.optimizers.automagic_sinkgd import AutomagicSinkgd
+        optimizer = AutomagicSinkgd(params, lr=float(learning_rate), **optimizer_params)
     else:
         raise ValueError(f'Unknown optimizer type {optimizer_type}')
     return optimizer
