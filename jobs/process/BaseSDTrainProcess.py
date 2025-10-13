@@ -179,10 +179,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
             dataset.cache_text_embeddings for dataset in self.dataset_configs
         )
 
-        # cannot train trigger word if caching text embeddings
-        if self.is_caching_text_embeddings and self.trigger_word is not None:
-            raise ValueError("Cannot train trigger word if caching text embeddings. Please remove the trigger word or disable text embedding caching.")
-
         self.embed_config = None
         embedding_raw = self.get_conf('embedding', None)
         if embedding_raw is not None:
@@ -356,6 +352,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 ctrl_img_1=sample_item.ctrl_img_1,
                 ctrl_img_2=sample_item.ctrl_img_2,
                 ctrl_img_3=sample_item.ctrl_img_3,
+                do_cfg_norm=sample_config.do_cfg_norm,
                 **extra_args
             ))
 
@@ -1771,7 +1768,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 )
 
                 # we cannot merge in if quantized
-                if self.model_config.quantize:
+                if self.model_config.quantize or self.model_config.layer_offloading:
                     # todo find a way around this
                     self.network.can_merge_in = False
 
