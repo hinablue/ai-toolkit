@@ -205,6 +205,20 @@ export default function SimpleJob({
               placeholder=""
               required
             />
+            {modelArch?.additionalSections?.includes('model.assistant_lora_path') && (
+              <TextInput
+                label="Training Adapter Path"
+                value={jobConfig.config.process[0].model.assistant_lora_path ?? ''}
+                docKey="config.process[0].model.assistant_lora_path"
+                onChange={(value: string | undefined) => {
+                  if (value?.trim() === '') {
+                    value = undefined;
+                  }
+                  setJobConfig(value, 'config.process[0].model.assistant_lora_path');
+                }}
+                placeholder=""
+              />
+            )}
             {modelArch?.additionalSections?.includes('model.low_vram') && (
               <FormGroup label="Options">
                 <Checkbox
@@ -215,12 +229,12 @@ export default function SimpleJob({
               </FormGroup>
             )}
             {modelArch?.additionalSections?.includes('model.qie.match_target_res') && (
-                <Checkbox
-                  label="Match Target Res"
-                  docKey="model.qie.match_target_res"
-                  checked={jobConfig.config.process[0].model.model_kwargs.match_target_res}
-                  onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.match_target_res')}
-                />
+              <Checkbox
+                label="Match Target Res"
+                docKey="model.qie.match_target_res"
+                checked={jobConfig.config.process[0].model.model_kwargs.match_target_res}
+                onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.match_target_res')}
+              />
             )}
             {modelArch?.additionalSections?.includes('model.layer_offloading') && (
               <>
@@ -586,16 +600,27 @@ export default function SimpleJob({
                 </FormGroup>
               </div>
               <div>
+                {disableSections.includes('train.diff_output_preservation') ||
+                disableSections.includes('train.blank_prompt_preservation') ? null : (
+                  <FormGroup label="Regularization">
+                    <></>
+                  </FormGroup>
+                )}
                 {disableSections.includes('train.diff_output_preservation') ? null : (
                   <>
-                    <FormGroup label="Regularization">
-                      <Checkbox
-                        label="Differential Output Preservation"
-                        className="pt-1"
-                        checked={jobConfig.config.process[0].train.diff_output_preservation || false}
-                        onChange={value => setJobConfig(value, 'config.process[0].train.diff_output_preservation')}
-                      />
-                    </FormGroup>
+                    <Checkbox
+                      label="Differential Output Preservation"
+                      docKey={'train.diff_output_preservation'}
+                      className="pt-1"
+                      checked={jobConfig.config.process[0].train.diff_output_preservation || false}
+                      onChange={value => {
+                        setJobConfig(value, 'config.process[0].train.diff_output_preservation');
+                        if (value && jobConfig.config.process[0].train.blank_prompt_preservation) {
+                          // only one can be enabled at a time
+                          setJobConfig(false, 'config.process[0].train.blank_prompt_preservation');
+                        }
+                      }}
+                    />
                     {jobConfig.config.process[0].train.diff_output_preservation && (
                       <>
                         <NumberInput
@@ -610,7 +635,7 @@ export default function SimpleJob({
                         />
                         <TextInput
                           label="DOP Preservation Class"
-                          className="pt-2"
+                          className="pt-2 pb-4"
                           value={jobConfig.config.process[0].train.diff_output_preservation_class as string}
                           onChange={value =>
                             setJobConfig(value, 'config.process[0].train.diff_output_preservation_class')
@@ -619,6 +644,78 @@ export default function SimpleJob({
                         />
                       </>
                     )}
+                  </>
+                )}
+                {disableSections.includes('train.blank_prompt_preservation') ? null : (
+                  <>
+                    <Checkbox
+                      label="Blank Prompt Preservation"
+                      docKey={'train.blank_prompt_preservation'}
+                      className="pt-1"
+                      checked={jobConfig.config.process[0].train.blank_prompt_preservation || false}
+                      onChange={value => {
+                        setJobConfig(value, 'config.process[0].train.blank_prompt_preservation');
+                        if (value && jobConfig.config.process[0].train.diff_output_preservation) {
+                          // only one can be enabled at a time
+                          setJobConfig(false, 'config.process[0].train.diff_output_preservation');
+                        }
+                      }}
+                    />
+                    {jobConfig.config.process[0].train.blank_prompt_preservation && (
+                      <>
+                        <NumberInput
+                          label="BPP Loss Multiplier"
+                          className="pt-2"
+                          value={
+                            (jobConfig.config.process[0].train.blank_prompt_preservation_multiplier as number) || 1.0
+                          }
+                          onChange={value =>
+                            setJobConfig(value, 'config.process[0].train.blank_prompt_preservation_multiplier')
+                          }
+                          placeholder="eg. 1.0"
+                          min={0}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </Card>
+        </div>
+        <div>
+          <Card title="Advanced" collapsible>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div>
+                <Checkbox
+                  label="Do Differential Guidance"
+                  docKey={'train.do_differential_guidance'}
+                  className="pt-1"
+                  checked={jobConfig.config.process[0].train.do_differential_guidance || false}
+                  onChange={value => {
+                    let newValue = value == false ? undefined : value;
+                    setJobConfig(newValue, 'config.process[0].train.do_differential_guidance');
+                    if (!newValue) {
+                      setJobConfig(undefined, 'config.process[0].train.differential_guidance_scale');
+                    } else if (
+                      jobConfig.config.process[0].train.differential_guidance_scale === undefined ||
+                      jobConfig.config.process[0].train.differential_guidance_scale === null
+                    ) {
+                      // set default differential guidance scale to 3.0
+                      setJobConfig(3.0, 'config.process[0].train.differential_guidance_scale');
+                    }
+                  }}
+                />
+                {jobConfig.config.process[0].train.differential_guidance_scale && (
+                  <>
+                    <NumberInput
+                      label="Differential Guidance Scale"
+                      className="pt-2"
+                      value={(jobConfig.config.process[0].train.differential_guidance_scale as number) || 3.0}
+                      onChange={value => setJobConfig(value, 'config.process[0].train.differential_guidance_scale')}
+                      placeholder="eg. 3.0"
+                      min={0}
+                    />
                   </>
                 )}
               </div>

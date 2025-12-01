@@ -99,7 +99,10 @@ def _ensure_cpu_pinned(t: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     if t is None:
         return None
     if t.device.type != "cpu":
-        t = t.to("cpu", copy=True)
+        try:
+            t = t.to("cpu", copy=True)
+        except Exception:
+            t = t.to("cpu")
     # Don't attempt to pin quantized tensors; many backends don't support it
     if _is_quantized_tensor(t):
         return t
@@ -583,6 +586,8 @@ class LinearLayerMemoryManager(BaseLayerMemoryManager):
             self.module.ara_lora_ref().org_forward = _mm_forward
         else:
             self.module.forward = _mm_forward
+        
+        self.module._memory_management_device = self.manager.process_device
 
 
 class ConvLayerMemoryManager(BaseLayerMemoryManager):
@@ -638,3 +643,5 @@ class ConvLayerMemoryManager(BaseLayerMemoryManager):
             self.module.ara_lora_ref().org_forward = _mm_forward
         else:
             self.module.forward = _mm_forward
+        
+        self.module._memory_management_device = self.manager.process_device

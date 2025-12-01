@@ -102,7 +102,7 @@ export default function JobsTable({ onlyActive = false }: JobsTableProps) {
     jd['Idle'] = { name: 'Idle', jobs: [] };
     jobs.forEach(job => {
       const gpu = gpuList.find(gpu => job.gpu_ids?.split(',').includes(gpu.index.toString())) as GpuInfo;
-      const key = `${gpu.index}`;
+      const key = `${gpu?.index || '0'}`;
       if (['queued', 'running', 'stopping'].includes(job.status) && key in jd) {
         jd[key].jobs.push(job);
       } else {
@@ -165,7 +165,7 @@ export default function JobsTable({ onlyActive = false }: JobsTableProps) {
                       <span className="text-red-400 mr-2">Queue Stopped</span>
                       <button
                         onClick={async () => {
-                          await startQueue(queue.gpu_ids as string);
+                          await startQueue(gpuKey);
                           refresh();
                         }}
                         className="ml-4 text-xs bg-green-700 hover:bg-green-600 px-2 py-1 rounded"

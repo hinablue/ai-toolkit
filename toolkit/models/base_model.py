@@ -811,9 +811,12 @@ class BaseModel:
         # then we are doing it, otherwise we are not and takes half the time.
         do_classifier_free_guidance = True
 
-        # check if batch size of embeddings matches batch size of latents
         if isinstance(text_embeddings.text_embeds, list):
-            te_batch_size = text_embeddings.text_embeds[0].shape[0]
+            if len(text_embeddings.text_embeds[0].shape) == 2:
+                # handle list of embeddings
+                te_batch_size = len(text_embeddings.text_embeds)
+            else:
+                te_batch_size = text_embeddings.text_embeds[0].shape[0]
         else:
             te_batch_size = text_embeddings.text_embeds.shape[0]
         if latents.shape[0] == te_batch_size:
@@ -1092,7 +1095,7 @@ class BaseModel:
 
         latent_list = []
         # Move to vae to device if on cpu
-        if self.vae.device == 'cpu':
+        if self.vae.device == torch.device("cpu"):
             self.vae.to(device)
         self.vae.eval()
         self.vae.requires_grad_(False)
@@ -1135,7 +1138,7 @@ class BaseModel:
             dtype = self.torch_dtype
 
         # Move to vae to device if on cpu
-        if self.vae.device == 'cpu':
+        if self.vae.device == torch.device('cpu'):
             self.vae.to(self.device)
         latents = latents.to(device, dtype=dtype)
         latents = (
