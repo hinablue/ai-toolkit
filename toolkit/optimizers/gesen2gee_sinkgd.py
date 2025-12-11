@@ -5,9 +5,9 @@ import torch.nn.functional as F
 from torch.nn.functional import normalize
 import math
 import copy
-from toolkit.optimizers.optimizer_utils import copy_stochastic, Auto8bitTensor, stochastic_grad_accummulation
+from toolkit.optimizers.optimizer_utils import copy_stochastic, stochastic_grad_accummulation
 
-class Automagic_Sinkgd(torch.optim.Optimizer):
+class Gesen2gee_Sinkgd(torch.optim.Optimizer):
 
     def __init__(
         self,
@@ -51,10 +51,7 @@ class Automagic_Sinkgd(torch.optim.Optimizer):
     def _init_state(self, p, group=None):
         state = self.state[p]
         state.setdefault("step", 0)
-
-        state['exp_avg'] = Auto8bitTensor(
-            torch.zeros_like(p.data)
-        )
+        state['exp_avg'] = torch.zeros_like(p.data)
 
         # ==== ALLoRA ====
         #ALLoRA: Adaptive Learning Rate Mitigates LoRA Fatal Flaws
@@ -63,83 +60,6 @@ class Automagic_Sinkgd(torch.optim.Optimizer):
             if len(p.shape) == 2:
                 row_norm = p.norm(dim=1, keepdim=True)
                 state["row_scaling"] = (1.0 / torch.sqrt(row_norm + 1.0 / (group['eta']**2))).mean().item()
-
-    def step_hook(self):
-        if not self.is_stochastic_rounding_accumulation:
-            return
-        # copy over stochastically rounded grads
-        for group in self.param_groups:
-            for param in group['params']:
-                if param.requires_grad and hasattr(param, "_accum_grad"):
-                    param.grad = param._accum_grad
-                    del param._accum_grad
-
-    def state_dict(self):
-        """Returns the state of the optimizer as a dict."""
-        # Get all current parameters from param_groups (as a set of parameter objects)
-        # Note: self.state uses parameter objects as keys, not IDs
-        current_params = set()
-        for group in self.param_groups:
-            for param in group['params']:
-                current_params.add(param)
-
-        # Filter self.state to only include parameters still in param_groups
-        # This prevents KeyError when PyTorch tries to map parameter IDs
-        filtered_state = {}
-        for param_obj, param_state in self.state.items():
-            if param_obj in current_params:
-                filtered_state[param_obj] = param_state
-
-        # Temporarily replace self.state with filtered version
-        original_state = self.state
-        self.state = filtered_state
-
-        try:
-            state_dict = super().state_dict()
-        finally:
-            # Restore original state
-            self.state = original_state
-
-        # Convert Auto8bitTensor objects to regular state dicts
-        for param_id, param_state in state_dict['state'].items():
-            for key, value in param_state.items():
-                if isinstance(value, Auto8bitTensor):
-                    param_state[key] = {
-                        '_type': 'Auto8bitTensor',
-                        'state': value.state_dict()
-                    }
-
-        return state_dict
-
-    def load_state_dict(self, state_dict):
-        """Loads the optimizer state."""
-        # Load the state dict (super() expects dict format for Auto8bitTensor)
-        super().load_state_dict(state_dict)
-
-        # Convert any Auto8bitTensor dicts or tensors back to objects after loading
-        for param_obj, param_state in self.state.items():
-            for key, value in list(param_state.items()):
-                if isinstance(value, dict) and value.get('_type') == 'Auto8bitTensor':
-                    try:
-                        param_state[key] = Auto8bitTensor(value['state'])
-                    except Exception:
-                        if key == 'exp_avg':
-                            param_state[key] = Auto8bitTensor(torch.zeros_like(param_obj.data))
-                        else:
-                            param_state[key] = value
-                elif isinstance(value, dict) and 'state' in value:
-                    # handle dict without _type marker
-                    param_state[key] = Auto8bitTensor(value['state'])
-                elif isinstance(value, torch.Tensor):
-                    param_state[key] = Auto8bitTensor(value)
-
-    @property
-    def supports_memory_efficient_fp16(self):
-        return False
-
-    @property
-    def supports_flat_params(self):
-        return True
 
     @staticmethod
     def Orthograd(
@@ -190,7 +110,6 @@ class Automagic_Sinkgd(torch.optim.Optimizer):
     @torch.no_grad()
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         """Performs a single optimization step"""
-        self.step_hook()
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -238,24 +157,7 @@ class Automagic_Sinkgd(torch.optim.Optimizer):
                 update = grad
                 if beta1 > 0:
                     if 'exp_avg' not in state:
-                        state['exp_avg'] = Auto8bitTensor(
-                            torch.zeros_like(p_fp32.data)
-                        )
-                    # Normalize exp_avg to Auto8bitTensor regardless of how it was loaded
-                    exp_avg_val = state['exp_avg']
-                    if isinstance(exp_avg_val, dict):
-                        # handle both {_type: 'Auto8bitTensor', state: ...} and plain dicts with 'state'
-                        if exp_avg_val.get('_type') == 'Auto8bitTensor' and 'state' in exp_avg_val:
-                            exp_avg_val = Auto8bitTensor(exp_avg_val['state'])
-                        elif 'state' in exp_avg_val:
-                            exp_avg_val = Auto8bitTensor(exp_avg_val['state'])
-                    elif isinstance(exp_avg_val, torch.Tensor):
-                        exp_avg_val = Auto8bitTensor(exp_avg_val)
-                    if not isinstance(exp_avg_val, Auto8bitTensor):
-                        # fallback: re-init to zeros if format unexpected
-                        exp_avg_val = Auto8bitTensor(torch.zeros_like(p_fp32.data))
-                    state['exp_avg'] = exp_avg_val
-
+                        state['exp_avg'] = torch.zeros_like(p_fp32.data)
                     exp_avg = state['exp_avg'].to(torch.float32)
                     exp_avg.mul_(beta1).add_(grad, alpha=1-beta1)
 
@@ -283,10 +185,6 @@ class Automagic_Sinkgd(torch.optim.Optimizer):
 
                 p_fp32.add_(-update.mul(lr))
 
-                state['exp_avg'] = Auto8bitTensor(exp_avg)
-
-                if p.dtype != torch.float32:
-                    # Apply stochastic rounding to parameters
-                    copy_stochastic(p, p_fp32)
+                copy_stochastic(p.data, p_fp32.data)
 
         return loss
