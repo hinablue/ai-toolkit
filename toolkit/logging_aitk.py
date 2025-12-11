@@ -42,20 +42,19 @@ class WandbLogger(EmptyLogger):
         self.project = project
         self.run_name = run_name
         self.config = config
-
     def start(self):
         try:
             import wandb
         except ImportError:
-            raise ImportError(
-                "Failed to import wandb. Please install wandb by running `pip install wandb`"
-            )
+            raise ImportError("Failed to import wandb. Please install wandb by running `pip install wandb`")
 
         # send the whole config to wandb
+        if os.environ.get("WANDB_API_KEY") is not None:
+            wandb.login(key=os.environ.get("WANDB_API_KEY"))
         run = wandb.init(project=self.project, name=self.run_name, config=self.config)
         self.run = run
-        self._log = wandb.log  # log function
-        self._image = wandb.Image  # image object
+        self._log = run.log # log function
+        self._image = wandb.Image # image object
 
     def log(self, *args, **kwargs):
         # when commit is False, wandb increments the step,
