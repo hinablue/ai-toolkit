@@ -66,7 +66,8 @@ RUN echo "Cache bust: ${CACHEBUST}" && \
 WORKDIR /app/ai-toolkit
 
 # 4. 安裝 Python 依賴
-RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt && \
+    pip install wandb
 
 # 5. Build UI
 WORKDIR /app/ai-toolkit/ui
@@ -78,7 +79,7 @@ RUN npm install && \
 EXPOSE 8675
 WORKDIR /app/ai-toolkit
 
-COPY start.sh /start.sh
+COPY docker/start.sh /start.sh
 RUN chmod +x /start.sh
 
 CMD ["/start.sh"]%
