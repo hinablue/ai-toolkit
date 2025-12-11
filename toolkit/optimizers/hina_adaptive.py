@@ -433,7 +433,7 @@ class Hina_Adaptive(torch.optim.Optimizer):
             torch.backends.cudnn.benchmark = True
             torch.backends.cudnn.enabled = True
 
-        print(f"[INFO] HinaAdaptive 初始化完成，記憶體預算：{vram_budget_gb}GB")
+        print(f"[INFO] Hina_Adaptive 初始化完成，記憶體預算：{vram_budget_gb}GB")
 
     def _initialize_adaptive_metadata(self):
         """初始化自適應版本的元數據結構（記憶體優化版本）"""
@@ -1194,7 +1194,7 @@ class Hina_Adaptive(torch.optim.Optimizer):
 
                 grad = param.grad.data
                 if grad.is_sparse:
-                    raise RuntimeError('HinaAdaptive 不支援稀疏梯度')
+                    raise RuntimeError('Hina_Adaptive 不支援稀疏梯度')
 
                 state = self.state[param]
                 param_id = id(param)
@@ -1223,7 +1223,7 @@ class Hina_Adaptive(torch.optim.Optimizer):
 
                 # AGR 正則化
                 if self.use_agr:
-                    grad = HinaAdaptive._apply_agr_regularization_optimized(grad)
+                    grad = Hina_Adaptive._apply_agr_regularization_optimized(grad)
 
                 # === 邊緣過擬合控制 ===
                 if len(grad.shape) >= 2:
@@ -1323,7 +1323,7 @@ class Hina_Adaptive(torch.optim.Optimizer):
 
                 # 謹慎更新
                 if self.use_cautious:
-                    update = HinaAdaptive._apply_cautious_update_optimized(update, grad)
+                    update = Hina_Adaptive._apply_cautious_update_optimized(update, grad)
 
                 # 動態自適應學習率調整
                 current_step_size = step_size
