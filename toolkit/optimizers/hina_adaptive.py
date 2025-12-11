@@ -9,6 +9,8 @@ from threading import Thread
 from collections import defaultdict
 import time
 
+from toolkit.optimizers.optimizer_utils import copy_stochastic, stochastic_grad_accummulation
+
 class MemoryMonitor:
     """動態記憶體監控器"""
 
@@ -432,6 +434,17 @@ class Hina_Adaptive(torch.optim.Optimizer):
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             torch.backends.cudnn.enabled = True
+
+        self.is_stochastic_rounding_accumulation = False
+
+        # Setup stochastic grad accumulation hooks
+        for group in self.param_groups:
+            for param in group['params']:
+                if param.requires_grad and param.dtype != torch.float32:
+                    self.is_stochastic_rounding_accumulation = True
+                    param.register_post_accumulate_grad_hook(
+                        stochastic_grad_accummulation
+                    )
 
         print(f"[INFO] Hina_Adaptive 初始化完成，記憶體預算：{vram_budget_gb}GB")
 
@@ -1372,9 +1385,9 @@ class Hina_Adaptive(torch.optim.Optimizer):
                     if isinstance(spd_penalty, torch.Tensor):
                         param.data.add_(spd_penalty, alpha=-group['lr'])
 
-                p_fp32.data = param.data.clone().to(torch.float32)
+                p_fp32_data = param.data.clone().to(torch.float32)
 
-                copy_stochastic(param.data, p_fp32.data)
+                copy_stochastic(param.data, p_fp32_data)
 
         return loss
 
