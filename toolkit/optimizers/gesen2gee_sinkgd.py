@@ -1,11 +1,13 @@
 import torch
-from torch.optim import Optimizer
+import torch.optim as optim
 from typing import Optional, Callable, Tuple
 import torch.nn.functional as F
 from torch.nn.functional import normalize
 import math
+import copy
+from toolkit.optimizers.optimizer_utils import copy_stochastic, stochastic_grad_accummulation
 
-class AutomagicSinkgd(Optimizer):
+class Gesen2gee_Sinkgd(torch.optim.Optimizer):
 
     def __init__(
         self,
@@ -35,27 +37,22 @@ class AutomagicSinkgd(Optimizer):
         self.warmup_steps = warmup_steps
         self.max_lr = lr
 
-    @property
-    def supports_memory_efficient_fp16(self):
-        return False
+        self.is_stochastic_rounding_accumulation = False
 
-    @property
-    def supports_flat_params(self):
-        return True
-
-    def step_hook(self):
-        if not self.is_stochastic_rounding_accumulation:
-            return
-        # copy over stochastically rounded grads
+        # Setup stochastic grad accumulation hooks
         for group in self.param_groups:
             for param in group['params']:
-                if param.requires_grad and hasattr(param, "_accum_grad"):
-                    param.grad = param._accum_grad
-                    del param._accum_grad
+                if param.requires_grad and param.dtype != torch.float32:
+                    self.is_stochastic_rounding_accumulation = True
+                    param.register_post_accumulate_grad_hook(
+                        stochastic_grad_accummulation
+                    )
 
     def _init_state(self, p, group=None):
         state = self.state[p]
         state.setdefault("step", 0)
+        state['exp_avg'] = torch.zeros_like(p.data)
+
         # ==== ALLoRA ====
         #ALLoRA: Adaptive Learning Rate Mitigates LoRA Fatal Flaws
         #https://arxiv.org/abs/2410.09692
@@ -65,7 +62,6 @@ class AutomagicSinkgd(Optimizer):
                 state["row_scaling"] = (1.0 / torch.sqrt(row_norm + 1.0 / (group['eta']**2))).mean().item()
 
     @staticmethod
-    @torch.jit.script
     def Orthograd(
         param: torch.Tensor,
         update: torch.Tensor,
@@ -93,7 +89,6 @@ class AutomagicSinkgd(Optimizer):
     #Gradient Multi-Normalization for Stateless and Scalable LLM Training
     #https://arxiv.org/abs/2502.06742
     @staticmethod
-    @torch.jit.script
     def SinkGD(
         update: torch.Tensor,
         num_sinkgd_iter: int = 1,
@@ -141,29 +136,34 @@ class AutomagicSinkgd(Optimizer):
                 if p.grad is None:
                     continue
                 state = self.state[p]
-                grad = p.grad.data
+
+                grad = p.grad.data.to(torch.float32)
+                p_fp32 = p.clone().to(torch.float32)
+
                 abs_grad = grad.abs()
                 grad_sum = abs_grad.sum() + 1e-12
                 alpha = abs_grad / grad_sum
                 grad = grad - alpha * grad
 
                 if len(state) == 0:
-                    self._init_state(p, group)
+                    self._init_state(p_fp32, group)
 
-                state['step'] += 1
+                if "step" not in state:
+                    state["step"] = 0
+                state["step"] += 1
                 self._step = state["step"] + 1
                 beta1 = group["beta1"]
 
                 update = grad
                 if beta1 > 0:
                     if 'exp_avg' not in state:
-                        state['exp_avg'] = torch.zeros_like(p.data)
-                    exp_avg = state['exp_avg']
+                        state['exp_avg'] = torch.zeros_like(p_fp32.data)
+                    exp_avg = state['exp_avg'].to(torch.float32)
                     exp_avg.mul_(beta1).add_(grad, alpha=1-beta1)
 
                 if grad.ndim == 2:
                     if group["orthograd"]:
-                        update = self.Orthograd(p, update)
+                        update = self.Orthograd(p_fp32, update)
                     update = self.SinkGD(update, self.sinkgd_iters)
 
                 if beta1 > 0:
@@ -181,8 +181,10 @@ class AutomagicSinkgd(Optimizer):
                     norm_grad = (param_abs_grad - mean_norm) / std_norm
                     ada_alpha = 4
                     theta = 2 / (1 + torch.exp(-ada_alpha * norm_grad))
-                    p.data.mul_(1 - (lr * group["weight_decay"] * theta))
+                    p_fp32.data.mul_(1 - (lr * group["weight_decay"] * theta))
 
-                p.add_(-update.mul(lr))
+                p_fp32.add_(-update.mul(lr))
+
+                copy_stochastic(p.data, p_fp32.data)
 
         return loss

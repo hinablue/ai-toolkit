@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '100mb',
     },
   },
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      // Externalize native modules to prevent webpack from trying to bundle them
+      config.externals = config.externals || [];
+      config.externals.push('osx-temperature-sensor');
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
