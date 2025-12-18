@@ -50,7 +50,7 @@ export interface CpuInfo {
 }
 
 export interface GPUApiResponse {
-  hasNvidiaSmi: boolean;
+  hasMps: boolean;
   gpus: GpuInfo[];
   error?: string;
 }

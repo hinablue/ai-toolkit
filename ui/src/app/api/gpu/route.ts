@@ -1,39 +1,34 @@
 import { NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import os from 'os';
 
 const execAsync = promisify(exec);
 
 export async function GET() {
   try {
-    // Get platform
-    const platform = os.platform();
-    const isWindows = platform === 'win32';
+    // Check if MPS is available
+    const hasMps = await checkMps();
 
-    // Check if nvidia-smi is available
-    const hasNvidiaSmi = await checkNvidiaSmi(isWindows);
-
-    if (!hasNvidiaSmi) {
+    if (!hasMps) {
       return NextResponse.json({
-        hasNvidiaSmi: false,
+        hasMps: false,
         gpus: [],
-        error: 'nvidia-smi not found or not accessible',
+        error: 'MPS not available on this system',
       });
     }
 
     // Get GPU stats
-    const gpuStats = await getGpuStats(isWindows);
+    const gpuStats = await getMpsGpuStats();
 
     return NextResponse.json({
-      hasNvidiaSmi: true,
+      hasMps: true,
       gpus: gpuStats,
     });
   } catch (error) {
-    console.error('Error fetching NVIDIA GPU stats:', error);
+    console.error('Error fetching MPS GPU stats:', error);
     return NextResponse.json(
       {
-        hasNvidiaSmi: false,
+        hasMps: false,
         gpus: [],
         error: `Failed to fetch GPU stats: ${error instanceof Error ? error.message : String(error)}`,
       },
@@ -42,82 +37,141 @@ export async function GET() {
   }
 }
 
-async function checkNvidiaSmi(isWindows: boolean): Promise<boolean> {
+async function checkMps(): Promise<boolean> {
   try {
-    if (isWindows) {
-      // Check if nvidia-smi is available on Windows
-      // It's typically located in C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe
-      // but we'll just try to run it directly as it may be in PATH
-      await execAsync('nvidia-smi -L');
-    } else {
-      // Linux/macOS check
-      await execAsync('which nvidia-smi');
-    }
-    return true;
+    // Check if MPS is available using Python
+    // This checks if torch.backends.mps.is_available() returns True
+    const command = 'python3 -c "import torch; print(torch.backends.mps.is_available())"';
+    const { stdout } = await execAsync(command);
+    return stdout.trim() === 'True';
   } catch (error) {
-    return false;
+    // If Python check fails, try to get GPU info from system_profiler as fallback
+    try {
+      await execAsync('system_profiler SPDisplaysDataType');
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-async function getGpuStats(isWindows: boolean) {
-  // Command is the same for both platforms, but the path might be different
-  const command =
-    'nvidia-smi --query-gpu=index,name,driver_version,temperature.gpu,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used,power.draw,power.limit,clocks.current.graphics,clocks.current.memory,fan.speed --format=csv,noheader,nounits';
+async function getMpsGpuStats() {
+  try {
+    // Get GPU information from system_profiler
+    const { stdout } = await execAsync('system_profiler SPDisplaysDataType -json');
+    const displayData = JSON.parse(stdout);
 
-  // Execute command
-  const { stdout } = await execAsync(command, {
-    env: { ...process.env, CUDA_DEVICE_ORDER: 'PCI_BUS_ID' },
-  });
+    const gpus: any[] = [];
 
-  // Parse CSV output
-  const gpus = stdout
-    .trim()
-    .split('\n')
-    .map(line => {
-      const [
-        index,
-        name,
-        driverVersion,
-        temperature,
-        gpuUtil,
-        memoryUtil,
-        memoryTotal,
-        memoryFree,
-        memoryUsed,
-        powerDraw,
-        powerLimit,
-        clockGraphics,
-        clockMemory,
-        fanSpeed,
-      ] = line.split(', ').map(item => item.trim());
+    if (displayData.SPDisplaysDataType && Array.isArray(displayData.SPDisplaysDataType)) {
+      displayData.SPDisplaysDataType.forEach((display: any, index: number) => {
+        const gpuName = display._name || display.sppci_model || 'Unknown GPU';
+        const vram = display.sppci_vram || display._spdisplays_vram || 'Unknown';
 
-      return {
-        index: parseInt(index),
-        name,
-        driverVersion,
-        temperature: parseInt(temperature),
+        // Parse VRAM (format: "8192 MB" or "8 GB")
+        let memoryTotal = 0;
+        if (typeof vram === 'string') {
+          const vramMatch = vram.match(/(\d+)\s*(MB|GB)/i);
+          if (vramMatch) {
+            memoryTotal = parseInt(vramMatch[1]);
+            if (vramMatch[2].toUpperCase() === 'GB') {
+              memoryTotal *= 1024;
+            }
+          }
+        }
+
+        // For MPS, we don't have real-time monitoring data like nvidia-smi
+        // So we'll use placeholder values or try to get basic info
+        gpus.push({
+          index: index,
+          name: gpuName,
+          driverVersion: 'MPS',
+          temperature: 0, // MPS doesn't provide temperature monitoring
+          utilization: {
+            gpu: 0, // MPS doesn't provide real-time utilization
+            memory: 0,
+          },
+          memory: {
+            total: memoryTotal,
+            free: memoryTotal, // We can't get real-time memory usage for MPS
+            used: 0,
+          },
+          power: {
+            draw: 0, // MPS doesn't provide power monitoring
+            limit: 0,
+          },
+          clocks: {
+            graphics: 0, // MPS doesn't provide clock monitoring
+            memory: 0,
+          },
+          fan: {
+            speed: 0, // MPS doesn't provide fan speed monitoring
+          },
+        });
+      });
+    }
+
+    // If no GPUs found from system_profiler, create a default MPS entry
+    if (gpus.length === 0) {
+      gpus.push({
+        index: 0,
+        name: 'Apple GPU (MPS)',
+        driverVersion: 'MPS',
+        temperature: 0,
         utilization: {
-          gpu: parseInt(gpuUtil),
-          memory: parseInt(memoryUtil),
+          gpu: 0,
+          memory: 0,
         },
         memory: {
-          total: parseInt(memoryTotal),
-          free: parseInt(memoryFree),
-          used: parseInt(memoryUsed),
+          total: 0,
+          free: 0,
+          used: 0,
         },
         power: {
-          draw: parseFloat(powerDraw),
-          limit: parseFloat(powerLimit),
+          draw: 0,
+          limit: 0,
         },
         clocks: {
-          graphics: parseInt(clockGraphics),
-          memory: parseInt(clockMemory),
+          graphics: 0,
+          memory: 0,
         },
         fan: {
-          speed: parseInt(fanSpeed) || 0, // Some GPUs might not report fan speed, default to 0
+          speed: 0,
         },
-      };
-    });
+      });
+    }
 
-  return gpus;
+    return gpus;
+  } catch (error) {
+    console.error('Error parsing GPU stats:', error);
+    // Return a default MPS GPU entry if parsing fails
+    return [
+      {
+        index: 0,
+        name: 'Apple GPU (MPS)',
+        driverVersion: 'MPS',
+        temperature: 0,
+        utilization: {
+          gpu: 0,
+          memory: 0,
+        },
+        memory: {
+          total: 0,
+          free: 0,
+          used: 0,
+        },
+        power: {
+          draw: 0,
+          limit: 0,
+        },
+        clocks: {
+          graphics: 0,
+          memory: 0,
+        },
+        fan: {
+          speed: 0,
+        },
+      },
+    ];
+  }
 }

@@ -37,7 +37,7 @@ export const defaultJobConfig: JobConfig = {
         type: 'diffusion_trainer',
         training_folder: 'output',
         sqlite_db_path: './aitk_db.db',
-        device: 'cuda',
+        device: 'mps',
         trigger_word: null,
         performance_log_every: 10,
         network: {
