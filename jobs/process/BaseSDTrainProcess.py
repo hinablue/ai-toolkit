@@ -89,7 +89,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         else:
             transformers.utils.logging.set_verbosity_error()
             diffusers.utils.logging.set_verbosity_error()
-        
+
         self.sd: StableDiffusion
         self.embedding: Union[Embedding, None] = None
 
@@ -148,12 +148,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.datasets_reg = None
         self.dataset_configs: List[DatasetConfig] = []
         self.params = []
-        
+
         # add dataset text embedding cache to their config
         if self.train_config.cache_text_embeddings:
             for raw_dataset in raw_datasets:
                 raw_dataset['cache_text_embeddings'] = True
-        
+
         if raw_datasets is not None and len(raw_datasets) > 0:
             for raw_dataset in raw_datasets:
                 dataset = DatasetConfig(**raw_dataset)
@@ -172,7 +172,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.datasets = []
                     self.datasets.append(dataset)
                 self.dataset_configs.append(dataset)
-        
+
         self.is_caching_text_embeddings = any(
             dataset.cache_text_embeddings for dataset in self.dataset_configs
         )
@@ -181,7 +181,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         embedding_raw = self.get_conf('embedding', None)
         if embedding_raw is not None:
             self.embed_config = EmbeddingConfig(**embedding_raw)
-        
+
         self.decorator_config: DecoratorConfig = None
         decorator_raw = self.get_conf('decorator', None)
         if decorator_raw is not None:
@@ -225,7 +225,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             unload_text_encoder=self.train_config.unload_text_encoder or self.is_caching_text_embeddings,
             require_grads=False  # we ensure them later
         )
-        
+
         self.get_params_device_state_preset = get_train_sd_device_state_preset(
             device=self.device_torch,
             train_unet=self.train_config.train_unet,
@@ -250,9 +250,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.named_lora = True
         self.snr_gos: Union[LearnableSNRGamma, None] = None
         self.ema: ExponentialMovingAverage = None
-        
+
         validate_configs(self.train_config, self.model_config, self.save_config, self.dataset_configs)
-        
+
         do_profiler = self.get_conf('torch_profiler', False)
         self.torch_profiler = None if not do_profiler else torch.profiler.profile(
             activities=[
@@ -260,7 +260,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 torch.profiler.ProfilerActivity.CUDA,
             ],
         )
-        
+
         self.current_boundary_index = 0
         self.steps_this_boundary = 0
         self.num_consecutive_oom = 0
@@ -321,7 +321,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             extra_args = {}
             if self.adapter_config is not None and self.adapter_config.test_img_path is not None:
                 extra_args['adapter_image_path'] = test_image_paths[i]
-            
+
             sample_item = sample_config.samples[i]
             if sample_item.seed is not None:
                 current_seed = sample_item.seed
@@ -363,11 +363,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # let adapter know we are sampling
         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
             self.adapter.is_sampling = True
-        
+
         # send to be generated
         self.sd.generate_images(gen_img_config_list, sampler=sample_config.sampler)
 
-        
+
         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
             self.adapter.is_sampling = False
 
@@ -445,9 +445,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # Combine and sort the lists
             combined_items = safetensors_files + directories + pt_files
             combined_items.sort(key=os.path.getctime)
-            
+
             num_saves_to_keep = self.save_config.max_step_saves_to_keep
-            
+
             if hasattr(self.sd, 'max_step_saves_to_keep_multiplier'):
                 num_saves_to_keep *= self.sd.max_step_saves_to_keep_multiplier
 
@@ -484,10 +484,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
     def post_save_hook(self, save_path):
         # override in subclass
         pass
-    
+
     def done_hook(self):
         pass
-    
+
     def end_step_hook(self):
         pass
 
@@ -557,7 +557,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     # replace extension
                     emb_file_path = os.path.splitext(emb_file_path)[0] + ".pt"
                 self.embedding.save(emb_file_path)
-            
+
             if self.decorator is not None:
                 dec_filename = f'{self.job.name}{step_num}.safetensors'
                 dec_file_path = os.path.join(self.save_root, dec_filename)
@@ -662,7 +662,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             path_to_save = file_path = os.path.join(self.save_root, 'learnable_snr.json')
             with open(path_to_save, 'w') as f:
                 json.dump(json_data, f, indent=4)
-        
+
         print_acc(f"Saved checkpoint to {file_path}")
 
         # save optimizer
@@ -704,14 +704,15 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.accelerator.is_main_process:
             self.logger.start()
         self.prepare_accelerator()
-        
+        self.setup_ema()
+
     def sample_step_hook(self, img_num, total_imgs):
         pass
-    
+
     def prepare_accelerator(self):
         # set some config
         self.accelerator.even_batches=False
-        
+
         # # prepare all the models stuff for accelerator (hopefully we dont miss any)
         self.sd.vae = self.accelerator.prepare(self.sd.vae)
         if self.sd.unet is not None:
@@ -736,7 +737,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # todo adapters may not be a module. need to check
             self.adapter = self.accelerator.prepare(self.adapter)
             self.modules_being_trained.append(self.adapter)
-        
+
         # prepare other things
         self.optimizer = self.accelerator.prepare(self.optimizer)
         if self.lr_scheduler is not None:
@@ -744,7 +745,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # self.data_loader = self.accelerator.prepare(self.data_loader)
         # if self.data_loader_reg is not None:
         #     self.data_loader_reg = self.accelerator.prepare(self.data_loader_reg)
-            
+
 
     def ensure_params_requires_grad(self, force=False):
         if self.train_config.do_paramiter_swapping and not force:
@@ -780,7 +781,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
     def hook_train_loop(self, batch):
         # return loss
         return 0.0
-    
+
     def hook_after_sd_init_before_load(self):
         pass
 
@@ -908,7 +909,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         while len(sigma.shape) < n_dim:
             sigma = sigma.unsqueeze(-1)
         return sigma
-    
+
     def get_optimal_noise(self, latents, dtype=torch.float32):
         batch_num = latents.shape[0]
         chunks = torch.chunk(latents, batch_num, dim=0)
@@ -926,7 +927,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             noise_chunks.append(best_noise)
         noise = torch.cat(noise_chunks, dim=0)
         return noise
-    
+
     def get_consistent_noise(self, latents, batch: 'DataLoaderBatchDTO', dtype=torch.float32):
         batch_num = latents.shape[0]
         chunks = torch.chunk(latents, batch_num, dim=0)
@@ -946,13 +947,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
             noise_chunks.append(noise_chunk)
         noise = torch.cat(noise_chunks, dim=0).to(dtype=dtype)
         return noise
-            
+
 
     def get_noise(
-        self, 
-        latents, 
-        batch_size, 
-        dtype=torch.float32, 
+        self,
+        latents,
+        batch_size,
+        dtype=torch.float32,
         batch: 'DataLoaderBatchDTO' = None,
         timestep=None,
     ):
@@ -977,7 +978,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     batch_size=batch_size,
                     noise_offset=self.train_config.noise_offset,
                 ).to(self.device_torch, dtype=dtype)
-        
+
         if self.train_config.blended_blur_noise:
             noise = get_blended_blur_noise(
                 latents, noise, timestep
@@ -1120,7 +1121,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     unaugmented_latents = self.sd.encode_images(batch.unaugmented_tensor)
 
             with self.timer('prepare_scheduler'):
-                
+
                 batch_size = len(batch.file_items)
                 min_noise_steps = self.train_config.min_denoising_steps
                 max_noise_steps = self.train_config.max_denoising_steps
@@ -1151,23 +1152,23 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.train_config.timestep_type == 'linear',
                         self.train_config.timestep_type == 'one_step',
                     ])
-                    
+
                     timestep_type = 'linear' if linear_timesteps else None
                     if timestep_type is None:
                         timestep_type = self.train_config.timestep_type
-                    
+
                     if self.train_config.timestep_type == 'next_sample':
                         # simulate a sample
                         num_train_timesteps = self.train_config.next_sample_timesteps
                         timestep_type = 'shift'
-                    
+
                     patch_size = 1
                     if self.sd.is_flux or 'flex' in self.sd.arch:
                         # flux is a patch size of 1, but latents are divided by 2, so we need to double it
                         patch_size = 2
                     elif hasattr(self.sd.unet.config, 'patch_size'):
                         patch_size = self.sd.unet.config.patch_size
-                    
+
                     self.sd.noise_scheduler.set_train_timesteps(
                         num_train_timesteps,
                         device=self.device_torch,
@@ -1195,8 +1196,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # clip min max indicies
             min_noise_steps = max(min_noise_steps, 0)
             max_noise_steps = min(max_noise_steps, num_train_timesteps - 1)
-            
-                    
+
+
             with self.timer('prepare_timesteps_indices'):
 
                 content_or_style = self.train_config.content_or_style
@@ -1241,7 +1242,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         min_noise_steps,
                         max_noise_steps
                     )
-                    
+
                 elif content_or_style == 'balanced':
                     if min_noise_steps == max_noise_steps:
                         timestep_indices = torch.ones((batch_size,), device=self.device_torch) * min_noise_steps
@@ -1265,7 +1266,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             with self.timer('convert_timestep_indices_to_timesteps'):
                 # convert the timestep_indices to a timestep
                 timesteps = self.sd.noise_scheduler.timesteps[timestep_indices.long()]
-                
+
             with self.timer('prepare_noise'):
                 # get noise
                 noise = self.get_noise(latents, batch_size, dtype=dtype, batch=batch, timestep=timesteps)
@@ -1286,29 +1287,29 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     latents = unaugmented_latents
 
                 noise_multiplier = self.train_config.noise_multiplier
-                
+
                 s = (noise.shape[0], noise.shape[1], 1, 1)
                 if len(noise.shape) == 5:
                     # if we have a 5d tensor, then we need to do it on a per batch item, per channel basis, per frame
                     s = (noise.shape[0], noise.shape[1], noise.shape[2], 1, 1)
-                
+
                 if self.train_config.random_noise_multiplier > 0.0:
-                    
+
                     # do it on a per batch item, per channel basis
                     noise_multiplier = 1 + torch.randn(
                         s,
                         device=noise.device,
                         dtype=noise.dtype
                     ) * self.train_config.random_noise_multiplier
-                
+
             with self.timer('make_noisy_latents'):
 
                 noise = noise * noise_multiplier
-                
+
                 if self.train_config.random_noise_shift > 0.0:
                     # get random noise -1 to 1
                     noise_shift = torch.randn(
-                        s,  
+                        s,
                         device=noise.device,
                         dtype=noise.dtype
                     ) * self.train_config.random_noise_shift
@@ -1413,7 +1414,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.network_config is not None:
             adapter_name = f"{adapter_name}_{suffix}"
         latest_save_path = self.get_latest_save_path(adapter_name)
-        
+
         if latest_save_path is not None and not self.adapter_config.train:
             # the save path is for something else since we are not training
             latest_save_path = self.adapter_config.name_or_path
@@ -1559,11 +1560,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
             custom_pipeline=self.custom_pipeline,
             noise_scheduler=sampler,
         )
-        
+
         self.hook_after_sd_init_before_load()
         # run base sd process run
         self.sd.load_model()
-        
+
         # compile the model if needed
         if self.model_config.compile:
             try:
@@ -1591,7 +1592,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     # if it has it
                     if hasattr(te, 'enable_xformers_memory_efficient_attention'):
                         te.enable_xformers_memory_efficient_attention()
-        
+
         if self.train_config.attention_backend != 'native':
             if hasattr(vae, 'set_attention_backend'):
                 vae.set_attention_backend(self.train_config.attention_backend)
@@ -1608,7 +1609,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             torch.backends.cuda.enable_math_sdp(True)
             torch.backends.cuda.enable_flash_sdp(True)
             torch.backends.cuda.enable_mem_efficient_sdp(True)
-        
+
         # # check if we have sage and is flux
         # if self.sd.is_flux:
         #     # try_to_activate_sage_attn()
@@ -1623,7 +1624,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         #         for block in model.single_transformer_blocks:
         #             processor = FluxSageAttnProcessor2_0()
         #             block.attn.set_processor(processor)
-                    
+
         #     except ImportError:
         #         print_acc("sage attention is not installed. Using SDP instead")
 
@@ -1709,7 +1710,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # if is_lycoris:
                 #     preset = PRESET['full']
                 # NetworkClass.apply_preset(preset)
-                
+
                 if hasattr(self.sd, 'target_lora_modules'):
                     network_kwargs['target_lin_modules'] = self.sd.target_lora_modules
 
@@ -1812,7 +1813,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     print_acc(f"Loading from {latest_save_path}")
                     extra_weights = self.load_weights(latest_save_path)
                     self.network.multiplier = 1.0
-                
+
                 if self.network_config.layer_offloading:
                     MemoryManager.attach(
                         self.network,
@@ -1841,7 +1842,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 })
 
                 flush()
-            
+
             if self.decorator_config is not None:
                 self.decorator = Decorator(
                     num_tokens=self.decorator_config.num_tokens,
@@ -1853,12 +1854,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     state_dict = load_file(latest_save_path)
                     self.decorator.load_state_dict(state_dict)
                     self.load_training_state_from_metadata(latest_save_path)
-                    
+
                 params.append({
                     'params': list(self.decorator.parameters()),
                     'lr': self.train_config.lr
                 })
-                
+
                 # give it to the sd network
                 self.sd.decorator = self.decorator
                 self.decorator.to(self.device_torch, dtype=torch.float32)
@@ -1924,13 +1925,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.start_step = self.step_num
 
         optimizer_type = self.train_config.optimizer.lower()
-        
+
         # esure params require grad
         self.ensure_params_requires_grad(force=True)
         optimizer = get_optimizer(self.params, optimizer_type, learning_rate=self.train_config.lr,
                                   optimizer_params=self.train_config.optimizer_params)
         self.optimizer = optimizer
-        
+
         # set it to do paramiter swapping
         if self.train_config.do_paramiter_swapping:
             # only works for adafactor, but it should have thrown an error prior to this otherwise
@@ -2012,7 +2013,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         elif self.step_num <= 1 or self.train_config.force_first_sample:
             print_acc("Generating baseline samples before training")
             self.sample(self.step_num)
-        
+
         if self.accelerator.is_local_main_process:
             self.progress_bar = ToolkitProgressBar(
                 total=self.train_config.steps,
@@ -2092,7 +2093,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 batch_list = []
 
                 for b in range(self.train_config.gradient_accumulation):
-                    # keep track to alternate on an accumulation step for reg   
+                    # keep track to alternate on an accumulation step for reg
                     batch_step = step
                     # don't do a reg step on sample or save steps as we dont want to normalize on those
                     if batch_step % 2 == 0 and dataloader_reg is not None and not is_save_step and not is_sample_step:
@@ -2185,7 +2186,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             if self.torch_profiler is not None:
                 torch.cuda.synchronize()  # Make sure all CUDA ops are done
                 self.torch_profiler.stop()
-                
+
                 print("\n==== Profile Results ====")
                 print(self.torch_profiler.key_averages().table(sort_by="cpu_time_total", row_limit=1000))
             self.timer.stop('train_loop')
@@ -2230,7 +2231,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if self.step_num != self.start_step:
                     if is_sample_step or is_save_step:
                         self.accelerator.wait_for_everyone()
-                        
+
                     if is_save_step:
                         self.accelerator
                         # print above the progress bar
@@ -2245,7 +2246,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         flush_next = True
                         if self.progress_bar is not None:
                             self.progress_bar.unpause()
-                            
+
                     if is_sample_step:
                         if self.progress_bar is not None:
                             self.progress_bar.pause()
@@ -2275,7 +2276,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.writer.add_scalar(f"lr", learning_rate, self.step_num)
                                 if self.progress_bar is not None:
                                     self.progress_bar.unpause()
-                        
+
                         if self.accelerator.is_main_process:
                             # log to logger
                             self.logger.log({
@@ -2305,7 +2306,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.timer.reset()
                         if self.progress_bar is not None:
                             self.progress_bar.unpause()
-                
+
                 # commit log
                 if self.accelerator.is_main_process:
                     self.logger.commit(step=self.step_num)
@@ -2367,14 +2368,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
     self,
     repo_id: str,
     private: bool = False,
-    ):  
+    ):
         if not self.accelerator.is_main_process:
             return
         readme_content = self._generate_readme(repo_id)
         readme_path = os.path.join(self.save_root, "README.md")
         with open(readme_path, "w", encoding="utf-8") as f:
             f.write(readme_content)
-        
+
         api = HfApi()
 
         api.create_repo(
@@ -2444,7 +2445,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # Sort by numeric index
             sample_image_paths.sort(key=lambda x: x[0])
 
-            # Create widgets matching prompt with the index 
+            # Create widgets matching prompt with the index
             for i, prompt in enumerate(self.sample_config.prompts):
                 if i < len(sample_image_paths):
                     # Associate prompts with sample image paths based on the extracted index
