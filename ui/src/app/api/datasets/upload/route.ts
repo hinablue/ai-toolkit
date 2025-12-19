@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     await mkdir(uploadDir, { recursive: true });
 
     const savedFiles: string[] = [];
-    
+
     // Process files sequentially to avoid overwhelming the system
     for (let i = 0; i < files.length; i++) {
       const file = files[i] as any;
@@ -49,9 +49,7 @@ export async function POST(request: NextRequest) {
 }
 
 // Increase payload size limit (default is 4mb)
-export const config = {
-  api: {
-    bodyParser: false,
-    responseLimit: '50mb',
-  },
+export const api = {
+  bodyParser: false,
+  responseLimit: '50mb',
 };

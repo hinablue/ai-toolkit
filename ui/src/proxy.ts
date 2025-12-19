@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server';
 // if route starts with these, approve
 const publicRoutes = ['/api/img/', '/api/files/'];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // check env var for AI_TOOLKIT_AUTH, if not set, approve all requests
   // if it is set make sure bearer token matches
   const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
@@ -41,9 +41,7 @@ export function middleware(request: NextRequest) {
 }
 
 // Configure which paths this middleware will run on
-export const config = {
-  matcher: [
-    // Apply to all API routes
-    '/api/:path*',
-  ],
-};
+export const matcher = [
+  // Apply to all API routes
+  '/api/:path*',
+];

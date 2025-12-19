@@ -1,9 +1,6 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  devIndicators: {
-    buildActivity: false,
-  },
   typescript: {
     // Remove this. Build fails because of route types
     ignoreBuildErrors: true,
@@ -12,8 +9,10 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '100mb',
     },
-    middlewareClientMaxBodySize: '100mb',
+    proxyClientMaxBodySize: '100mb',
   },
+  serverExternalPackages: ["osx-temperature-sensor", "systeminformation"],
+  turbopack: {},
   webpack: (config, { isServer }) => {
     if (isServer) {
       // Externalize native modules to prevent webpack from trying to bundle them
