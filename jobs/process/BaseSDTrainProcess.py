@@ -708,6 +708,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.accelerator.is_main_process:
             self.logger.start()
         self.prepare_accelerator()
+        self.setup_ema()
 
     def sample_step_hook(self, img_num, total_imgs):
         pass
@@ -1821,7 +1822,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     print_acc(f"Loading from {latest_save_path}")
                     extra_weights = self.load_weights(latest_save_path)
                     self.network.multiplier = 1.0
-                
+
                 if self.network_config.layer_offloading:
                     MemoryManager.attach(
                         self.network,
