@@ -1,5 +1,4 @@
 FROM python:3.12-slim
-
 LABEL authors="jaret, hinablue<hinablue@gmail.com>"
 
 # 設置環境變數
