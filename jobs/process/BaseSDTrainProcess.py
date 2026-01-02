@@ -821,7 +821,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
                 if len(paths) > 0:
                     latest_path = max(paths, key=os.path.getctime)
-        
+
         if latest_path is None and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
             # set pretrained lora path as load path if we do not have a checkpoint to resume from
             if os.path.exists(self.network_config.pretrained_lora_path):
@@ -1630,7 +1630,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 torch.backends.mps.enable_math_sdp(True)
                 torch.backends.mps.enable_flash_sdp(True)
                 torch.backends.mps.enable_mem_efficient_sdp(True)
-
         # # check if we have sage and is flux
         # if self.sd.is_flux:
         #     # try_to_activate_sage_attn()
