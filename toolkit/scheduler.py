@@ -9,14 +9,18 @@ def get_lr_scheduler(
         **kwargs,
 ):
     if name == "cosine":
-        if 'total_iters' in kwargs:
+        if 'max_iterations' in kwargs:
+            kwargs['T_max'] = kwargs.pop('max_iterations')
+        else:
             kwargs['T_max'] = kwargs.pop('total_iters')
         return torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, **kwargs
         )
     elif name == "cosine_with_restarts":
-        if 'total_iters' in kwargs:
-            kwargs['T_0'] = kwargs.pop('total_iters')
+        if 'max_iterations' in kwargs:
+            kwargs['T_max'] = kwargs.pop('max_iterations')
+        else:
+            kwargs['T_max'] = kwargs.pop('total_iters')
         return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer, **kwargs
         )
