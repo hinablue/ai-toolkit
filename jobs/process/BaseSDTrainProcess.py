@@ -1019,7 +1019,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
                 conditioned_prompts = []
 
-                for prompt, is_reg in zip(prompts, is_reg_list):
+                for idx, (prompt, is_reg) in enumerate(zip(prompts, is_reg_list)):
+                    # get the dataset trigger_word for this prompt
+                    # handle the case where prompts might be doubled (short_and_long_captions, refiner, etc.)
+                    file_item_idx = idx % len(batch.file_items)
+                    dataset_trigger_word = batch.file_items[file_item_idx].dataset_config.trigger_word
+                    # use dataset trigger_word if available, otherwise fall back to global trigger_word
+                    trigger_word_to_use = dataset_trigger_word if dataset_trigger_word is not None else self.trigger_word
 
                     # make sure the embedding is in the prompts
                     if self.embedding is not None:
@@ -1037,12 +1043,19 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         )
 
                     # make sure trigger is in the prompts if not a regularization run
-                    if self.trigger_word is not None:
-                        prompt = self.sd.inject_trigger_into_prompt(
-                            prompt,
-                            trigger=self.trigger_word,
-                            add_if_not_present=not is_reg,
-                        )
+                    if trigger_word_to_use is not None:
+                        if is_reg:
+                            # For regularization runs, remove the trigger word if it exists in the prompt
+                            # This ensures is_reg datasets don't contain the special trigger word
+                            prompt = prompt.replace(trigger_word_to_use, '').strip()
+                            # Clean up any double commas or spaces that might result
+                            prompt = ', '.join([p.strip() for p in prompt.split(',') if p.strip()])
+                        else:
+                            prompt = self.sd.inject_trigger_into_prompt(
+                                prompt,
+                                trigger=trigger_word_to_use,
+                                add_if_not_present=True,
+                            )
 
                     if not is_reg and self.train_config.prompt_saturation_chance > 0.0:
                         # do random prompt saturation by expanding the prompt to hit at least 77 tokens

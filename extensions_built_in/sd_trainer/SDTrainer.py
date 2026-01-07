@@ -492,6 +492,11 @@ class SDTrainer(BaseSDTrainProcess):
 
         with torch.no_grad():
             loss_multiplier = torch.tensor(batch.loss_multiplier_list).to(self.device_torch, dtype=torch.float32)
+            # Apply reg_weight to is_reg items in the batch
+            is_reg_list = batch.get_is_reg_list()
+            for idx, is_reg_item in enumerate(is_reg_list):
+                if is_reg_item:
+                    loss_multiplier[idx] = loss_multiplier[idx] * self.train_config.reg_weight
 
         if self.train_config.match_noise_norm:
             # match the norm of the noise
@@ -1501,6 +1506,9 @@ class SDTrainer(BaseSDTrainProcess):
                         with torch.set_grad_enabled(False):
                             if batch.prompt_embeds is not None:
                                 # use the cached embeds
+                                # Note: Cached embeds should already contain trigger_word if it was added during caption loading
+                                # The cached embeds are generated from file_item.caption, which should already have trigger_word
+                                # if the dataset trigger_word was set and is_reg is false
                                 conditional_embeds = batch.prompt_embeds.clone().detach().to(
                                     self.device_torch, dtype=dtype
                                 )
