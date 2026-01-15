@@ -870,6 +870,7 @@ class LoRANetwork(torch.nn.Module):
                                 module_dropout=module_dropout,
                             )
                             loras.append(lora)
+
             return loras, skipped
 
         text_encoders = text_encoder if type(text_encoder) == list else [text_encoder]
