@@ -280,10 +280,13 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                 self.peft_format = True
 
         if self.peft_format:
-            # no alpha for peft
-            self.alpha = self.lora_dim
+            # no alpha for peft, default to rank if it's 1 or None (default in config)
+            # if user provided a value, honor it.
+            if self.alpha == 1.0 or self.alpha is None:
+                self.alpha = self.lora_dim
             alpha = self.alpha
-            self.conv_alpha = self.conv_lora_dim
+            if self.conv_alpha == 1.0 or self.conv_alpha is None:
+                self.conv_alpha = self.conv_lora_dim
             conv_alpha = self.conv_alpha
 
         self.full_train_in_out = full_train_in_out
