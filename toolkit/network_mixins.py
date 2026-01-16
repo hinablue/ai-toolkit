@@ -561,8 +561,25 @@ class ToolkitNetworkMixin:
 
             new_save_dict = {}
             for key, value in save_dict.items():
-                if key.endswith('.alpha'):
-                    continue
+                if key.endswith('.alpha') and self.network_type.lower() != "lokr":
+                    # only skip if alpha is the same as rank (standard PEFT)
+                    # if it differs, we want to save it (Option 1)
+                    rank_key = key.replace('.alpha', '.lora_down.weight')
+                    if rank_key in save_dict:
+                        rank = save_dict[rank_key].shape[0]
+                        if int(value) == int(rank):
+                            continue
+                    else:
+                        # fallback check for lora_up or other possible naming
+                        rank_key_up = key.replace('.alpha', '.lora_up.weight')
+                        if rank_key_up in save_dict:
+                            # for linear up, rank is usually the second dim [out, rank]
+                            rank = save_dict[rank_key_up].shape[1]
+                            if int(value) == int(rank):
+                                continue
+                        else:
+                            continue
+
                 new_key = key
                 new_key = new_key.replace('lora_down', 'lora_A')
                 new_key = new_key.replace('lora_up', 'lora_B')
@@ -571,9 +588,9 @@ class ToolkitNetworkMixin:
                 new_save_dict[new_key] = value
 
             save_dict = new_save_dict
+        
 
-
-        if self.network_type.lower() == "lokr":
+        if self.network_type.lower() == "lokr" and self.use_old_lokr_format:
             new_save_dict = {}
             for key, value in save_dict.items():
                 # lora_transformer_transformer_blocks_7_attn_to_v.lokr_w1 to lycoris_transformer_blocks_7_attn_to_v.lokr_w1
@@ -647,15 +664,38 @@ class ToolkitNetworkMixin:
                 # lora_down = lora_A
                 # lora_up = lora_B
                 # no alpha
-                if load_key.endswith('.alpha'):
-                    continue
+                if key.endswith('.alpha') and self.network_type.lower() != "lokr":
+                    # only skip if alpha is the same as rank (standard PEFT)
+                    # if it differs, we want to save it (Option 1)
+                    rank_key = key.replace('.alpha', '.lora_A.weight')
+                    if rank_key in weights_sd:
+                        rank = weights_sd[rank_key].shape[0]
+                        if int(value) == int(rank):
+                            continue
+                    else:
+                        # fallback check for lora_up or other possible naming
+                        rank_key_up = key.replace('.alpha', '.lora_B.weight')
+                        if rank_key_up in weights_sd:
+                            # for linear up, rank is usually the second dim [out, rank]
+                            rank = weights_sd[rank_key_up].shape[1]
+                            if int(value) == int(rank):
+                                continue
+                        else:
+                            continue
                 load_key = load_key.replace('lora_A', 'lora_down')
                 load_key = load_key.replace('lora_B', 'lora_up')
                 # replace all . with $$
                 load_key = load_key.replace('.', '$$')
                 load_key = load_key.replace('$$lora_down$$', '.lora_down.')
                 load_key = load_key.replace('$$lora_up$$', '.lora_up.')
-
+                
+                # patch lokr, not sure why we need to but whatever
+                if self.network_type.lower() == "lokr":
+                    load_key = load_key.replace('$$lokr_w1', '.lokr_w1')
+                    load_key = load_key.replace('$$lokr_w2', '.lokr_w2')
+                    if load_key.endswith('$$alpha'):
+                        load_key = load_key[:-7] + '.alpha'
+            
             if self.network_type.lower() == "lokr":
                 # lora_transformer_transformer_blocks_7_attn_to_v.lokr_w1 to lycoris_transformer_blocks_7_attn_to_v.lokr_w1
                 load_key = load_key.replace('lycoris_', 'lora_transformer_')

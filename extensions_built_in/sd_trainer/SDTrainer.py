@@ -867,6 +867,11 @@ class SDTrainer(BaseSDTrainProcess):
                 loss = apply_snr_weight(loss, timesteps, self.sd.noise_scheduler, self.train_config.min_snr_gamma)
 
         loss = loss.mean()
+        
+        # check for audio loss
+        if batch.audio_pred is not None and batch.audio_target is not None:
+            audio_loss = torch.nn.functional.mse_loss(batch.audio_pred.float(), batch.audio_target.float(), reduction="mean")
+            loss = loss + audio_loss
 
         # check for additional losses
         if self.adapter is not None and hasattr(self.adapter, "additional_loss") and self.adapter.additional_loss is not None:
@@ -1284,11 +1289,15 @@ class SDTrainer(BaseSDTrainProcess):
             self.timer.stop('preprocess_batch')
 
             is_reg = False
+            # Note: loss_multiplier for reg_weight is now handled in calculate_loss()
+            # This loss_multiplier is only used for final scaling if needed (e.g., dataset-level loss_multiplier)
+            # We still create it here for backward compatibility, but reg_weight is applied in calculate_loss
             loss_multiplier = torch.ones((noisy_latents.shape[0], 1, 1, 1), device=self.device_torch, dtype=dtype)
             for idx, file_item in enumerate(batch.file_items):
                 if file_item.is_reg:
-                    loss_multiplier[idx] = loss_multiplier[idx] * self.train_config.reg_weight
                     is_reg = True
+                    # reg_weight is now applied in calculate_loss, not here
+                    # This multiplier is kept for potential future use or other multiplier types
 
             adapter_images = None
             sigmas = None

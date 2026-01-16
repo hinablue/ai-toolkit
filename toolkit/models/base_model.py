@@ -188,6 +188,11 @@ class BaseModel:
         self.has_multiple_control_images = False
         # do not resize control images
         self.use_raw_control_images = False
+        # defines if the model supports model paths. Only some will
+        self.supports_model_paths = False
+        
+        # use new lokr format (default false for old models for backwards compatibility)
+        self.use_old_lokr_format = True
 
     # properties for old arch for backwards compatibility
     @property
@@ -811,12 +816,13 @@ class BaseModel:
         # then we are doing it, otherwise we are not and takes half the time.
         do_classifier_free_guidance = True
 
-        if isinstance(text_embeddings.text_embeds, list):
+        if isinstance(text_embeddings.text_embeds, list) or isinstance(text_embeddings.text_embeds, tuple):
             if len(text_embeddings.text_embeds[0].shape) == 2:
-                # handle list of embeddings
-                te_batch_size = len(text_embeddings.text_embeds)
+                # handle list of embeddings (Z-Image style - individual prompts)
+                te_batch_size = len([t for t in text_embeddings.text_embeds if t is not None])
             else:
-                te_batch_size = text_embeddings.text_embeds[0].shape[0]
+                # handle list of rank-3 tensors (SDXL/Flux style - batch, length, dim)
+                te_batch_size = sum([t.shape[0] for t in text_embeddings.text_embeds if t is not None])
         else:
             te_batch_size = text_embeddings.text_embeds.shape[0]
         if latents.shape[0] == te_batch_size:
@@ -1125,6 +1131,10 @@ class BaseModel:
         latents = latents.to(device, dtype=dtype)
 
         return latents
+    
+    def encode_audio(self, audio_data_list):
+        # audio_date_list is a list of {"waveform": waveform[C, L], "sample_rate": int(sample_rate)}
+        raise NotImplementedError("Audio encoding not implemented for this model.")
 
     def decode_latents(
             self,

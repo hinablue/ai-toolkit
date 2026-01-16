@@ -100,6 +100,9 @@ def get_optimizer(
     elif lower_type == 'gesen2gee_sinkgd':
         from toolkit.optimizers.gesen2gee_sinkgd import Gesen2gee_Sinkgd
         optimizer = Gesen2gee_Sinkgd(params, lr=float(learning_rate), **optimizer_params)
+    elif lower_type == 'hina_adaptive':
+        from toolkit.optimizers.hina_adaptive import Hina_Adaptive
+        optimizer = Hina_Adaptive(params, lr=float(learning_rate), **optimizer_params)
     else:
         raise ValueError(f'Unknown optimizer type {optimizer_type}')
     return optimizer

@@ -265,18 +265,28 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
         self.peft_format = peft_format
         self.is_transformer = is_transformer
         
+        # use the old format for older models unless the user has specified otherwise
+        self.use_old_lokr_format = False
+        if self.network_config is not None and hasattr(self.network_config, 'old_lokr_format'):
+            self.use_old_lokr_format = self.network_config.old_lokr_format
+        # also allow a false from the model itself
+        if base_model is not None and not base_model.use_old_lokr_format:
+            self.use_old_lokr_format = False
 
         # always do peft for flux only for now
         if self.is_flux or self.is_v3 or self.is_lumina2 or is_transformer:
-            # don't do peft format for lokr
-            if self.network_type.lower() != "lokr":
+            # don't do peft format for lokr if using old format
+            if self.network_type.lower() != "lokr" or not self.use_old_lokr_format:
                 self.peft_format = True
 
         if self.peft_format:
-            # no alpha for peft
-            self.alpha = self.lora_dim
+            # no alpha for peft, default to rank if it's 1 or None (default in config)
+            # if user provided a value, honor it.
+            if self.alpha == 1.0 or self.alpha is None:
+                self.alpha = self.lora_dim
             alpha = self.alpha
-            self.conv_alpha = self.conv_lora_dim
+            if self.conv_alpha == 1.0 or self.conv_alpha is None:
+                self.conv_alpha = self.conv_lora_dim
             conv_alpha = self.conv_alpha
 
         self.full_train_in_out = full_train_in_out
@@ -445,6 +455,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                                 **module_kwargs
                             )
                             loras.append(lora)
+
                             if self.network_type.lower() == "lokr":
                                 try:
                                     lora_shape_dict[lora_name] = [list(lora.lokr_w1.weight.shape), list(lora.lokr_w2.weight.shape)]

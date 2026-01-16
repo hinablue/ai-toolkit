@@ -1,10 +1,5 @@
 import torch
-import torch.optim as optim
-from typing import Optional, Callable, Tuple
-import torch.nn.functional as F
-from torch.nn.functional import normalize
-import math
-import copy
+from typing import Optional, Callable
 from toolkit.optimizers.optimizer_utils import copy_stochastic, stochastic_grad_accummulation
 
 class Gesen2gee_Sinkgd(torch.optim.Optimizer):
@@ -12,30 +7,37 @@ class Gesen2gee_Sinkgd(torch.optim.Optimizer):
     def __init__(
         self,
         params,
-        lr: float = 1e-4,
+        lr: float = 5e-5,
         allora: bool = True,
-        eta: float = 2,
+        eta: float = 2.0,
         orthograd: bool = False,
         sinkgd_iters: int = 1,
         beta1: float = 0.9,
-        weight_decay: float = 0.01,
+        weight_decay: float = 0.1,
         warmup_steps: int = 200,
+        max_lr: int = 300,
+        min_lr: int = 10,
+        lr_bump: int = 0,
+        use_kahan: bool = True, # [New] Kahan switch
     ):
-        self.lr = lr
-        self.sinkgd_iters = sinkgd_iters
+        self.sinkgd_iters = int(sinkgd_iters)
+        self.weight_decay = float(weight_decay)
+        self.warmup_steps = int(warmup_steps)
+        self._step = 1
+
         defaults = dict(
-            lr=lr,
-            allora=allora,
-            eta=eta,
-            beta1=beta1,
-            weight_decay=weight_decay,
-            orthograd=orthograd
+            lr=float(lr),
+            allora=bool(allora),
+            eta=float(eta),
+            beta1=float(beta1),
+            weight_decay=float(weight_decay),
+            orthograd=bool(orthograd),
+            lr_bump=int(lr_bump),
+            min_lr=int(min_lr),
+            max_lr=int(max_lr),
+            use_kahan=bool(use_kahan), # [New] Added to defaults
         )
         super().__init__(params, defaults)
-        self.weight_decay = weight_decay
-        self._step = 1
-        self.warmup_steps = warmup_steps
-        self.max_lr = lr
 
         self.is_stochastic_rounding_accumulation = False
 
@@ -48,143 +50,196 @@ class Gesen2gee_Sinkgd(torch.optim.Optimizer):
                         stochastic_grad_accummulation
                     )
 
-    def _init_state(self, p, group=None):
+    def _init_state(self, p: torch.Tensor, group):
         state = self.state[p]
         state.setdefault("step", 0)
-        state['exp_avg'] = torch.zeros_like(p.data)
+        state.setdefault("lr_max_val", 0.0)
 
-        # ==== ALLoRA ====
-        #ALLoRA: Adaptive Learning Rate Mitigates LoRA Fatal Flaws
-        #https://arxiv.org/abs/2410.09692
-        if group['allora']:
-            if len(p.shape) == 2:
-                row_norm = p.norm(dim=1, keepdim=True)
-                state["row_scaling"] = (1.0 / torch.sqrt(row_norm + 1.0 / (group['eta']**2))).mean().item()
+        if group["allora"] and p.ndim == 2:
+            row_norm = p.norm(dim=1, keepdim=True)
+            state["row_scaling"] = (
+                1.0 / torch.sqrt(row_norm + 1.0 / (group["eta"] ** 2))
+            ).mean().item()
+
+        if group["lr_bump"] > 0:
+            state.setdefault(
+                "lr_mask",
+                torch.full_like(p.data, fill_value=group["min_lr"], dtype=torch.int16),
+            )
+            state.setdefault("last_polarity", torch.zeros_like(p.data, dtype=torch.bool))
+
+        if group["beta1"] > 0:
+            state.setdefault("exp_avg", torch.zeros_like(p.data))
+
+        # [New] Initialize Kahan compensation buffer
+        # Only create if enabled and not already present. Same dtype as params (e.g., BF16)
+        if group.get("use_kahan", False) and "kahan_comp" not in state:
+            state["kahan_comp"] = torch.zeros_like(p.data)
 
     @staticmethod
-    def Orthograd(
-        param: torch.Tensor,
-        update: torch.Tensor,
-        eps: float = 1e-30
-    ):
+    @torch.jit.script
+    def Orthograd(param: torch.Tensor, update: torch.Tensor, eps: float = 1e-30):
         w = param.view(-1)
         g = update.view(-1)
         proj = torch.dot(w, g) / (torch.dot(w, w) + eps)
         g_orth = g - proj * w
-        update = g_orth.view_as(update)
-        return update
+        return g_orth.view_as(update)
 
     @staticmethod
-    def centralize_gradient(x):
-        """credit - https://github.com/Yonghongwei/Gradient-Centralization """
-
-        size = x.dim()
-        # print(f"size = {size}")
-
-        if size > 1:
-            x.add_(-x.mean(dim=tuple(range(1, size)), keepdim=True))
-        return x
-
-    # === SinkGD ===
-    #Gradient Multi-Normalization for Stateless and Scalable LLM Training
-    #https://arxiv.org/abs/2502.06742
-    @staticmethod
-    def SinkGD(
-        update: torch.Tensor,
-        num_sinkgd_iter: int = 1,
-        eps: float = 1e-30
-    ) -> torch.Tensor:
-        if num_sinkgd_iter > 0:
+    @torch.jit.script
+    def SinkGD(update: torch.Tensor, num_sinkgd_iter: int = 1, eps: float = 1e-30):
+        if num_sinkgd_iter > 0 and update.ndim == 2:
             m, n = update.shape
             sqrt_n = n ** 0.5
             sqrt_m = m ** 0.5
             for _ in range(num_sinkgd_iter):
                 row_norm = torch.linalg.vector_norm(update, dim=1, keepdim=True) + eps
-                row_scaling = sqrt_n / row_norm
-                update = update * row_scaling
+                update = update * (sqrt_n / row_norm)
                 col_norm = torch.linalg.vector_norm(update, dim=0, keepdim=True) + eps
-                col_scaling = sqrt_m / col_norm
-                update = update * col_scaling
+                update = update * (sqrt_m / col_norm)
         return update
+
+    def get_learning_rates(self):
+        out = []
+        for group in self.param_groups:
+            vals = []
+            for p in group["params"]:
+                st = self.state.get(p)
+                if st and ("avg_lr_no_allora" in st):
+                    vals.append(st["avg_lr_no_allora"])
+            out.append(sum(vals) / len(vals) if vals else float(group["lr"]))
+        return out
+
+    def get_avg_learning_rate(self):
+        lrs = self.get_learning_rates()
+        return sum(lrs) / len(lrs) if lrs else 0.0
 
     @torch.no_grad()
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        """Performs a single optimization step"""
         loss = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
 
-        for group in self.param_groups:
-            use_warmup, use_weight_decay = False, False
-            if self._step <= self.warmup_steps:
-                use_warmup = True
-                if self.weight_decay > 0:
-                    grads_this_group = []
-                    for p in group["params"]:
-                        if p.grad is not None:
-                            grads_this_group.append(p.grad.view(-1))
-                    if len(grads_this_group) == 0:
-                        continue
-                    all_group_grads = torch.cat(grads_this_group)
-                    abs_all_group_grads = torch.abs(all_group_grads)
-                    use_weight_decay = True
-                    mean_norm = abs_all_group_grads.mean()
-                    std_norm = abs_all_group_grads.std(unbiased=False) + 1e-12
+        in_warmup = (self._step <= self.warmup_steps)
 
-            for p in group['params']:
-                if p.grad is None:
-                    continue
+        for group in self.param_groups:
+            use_weight_decay = False
+            mean_norm, std_norm = 0.0, 1.0
+            if in_warmup and group["weight_decay"] > 0:
+                grads_flat = [p.grad.detach().view(-1) for p in group["params"] if p.grad is not None]
+                if grads_flat:
+                    all_g = torch.cat(grads_flat)
+                    abs_all = all_g.abs()
+                    mean_norm = abs_all.mean()
+                    std_norm = abs_all.std(unbiased=False) + 1e-12
+                    use_weight_decay = True
+
+            for p in group["params"]:
+                if p.grad is None: continue
                 state = self.state[p]
+                if not state: self._init_state(p, group)
 
                 grad = p.grad.data.to(torch.float32)
                 p_fp32 = p.clone().to(torch.float32)
 
-                abs_grad = grad.abs()
-                grad_sum = abs_grad.sum() + 1e-12
-                alpha = abs_grad / grad_sum
-                grad = grad - alpha * grad
+                # Ensure Kahan buffer is initialized if needed (in case of loaded state dicts)
+                if group.get("use_kahan", False) and "kahan_comp" not in state:
+                    state["kahan_comp"] = torch.zeros_like(p_fp32.data)
 
-                if len(state) == 0:
-                    self._init_state(p_fp32, group)
-
-                if "step" not in state:
-                    state["step"] = 0
                 state["step"] += 1
-                self._step = state["step"] + 1
-                beta1 = group["beta1"]
 
-                update = grad
-                if beta1 > 0:
-                    if 'exp_avg' not in state:
-                        state['exp_avg'] = torch.zeros_like(p_fp32.data)
-                    exp_avg = state['exp_avg'].to(torch.float32)
-                    exp_avg.mul_(beta1).add_(grad, alpha=1-beta1)
-
+                # Update Logic
                 if grad.ndim == 2:
-                    if group["orthograd"]:
-                        update = self.Orthograd(p_fp32, update)
-                    update = self.SinkGD(update, self.sinkgd_iters)
+                    update = self.SinkGD(grad, self.sinkgd_iters)
+                else:
+                    update = grad
 
+                # Apply Orthograd if enabled
+                if group["orthograd"]:
+                     update = self.Orthograd(p_fp32.data, update)
+
+                beta1 = group["beta1"]
                 if beta1 > 0:
-                    update = update.abs().mul_(exp_avg.sign())
+                    state["exp_avg"].mul_(beta1).add_(update, alpha=1 - beta1)
+                    update = update.abs().mul_(state["exp_avg"].sign())
 
-                allora = state.get("row_scaling", 1.0)
-                lr = group["lr"] * allora
+                base_lr = float(group["lr"])
+                allora_scaling = float(state.get("row_scaling", 1.0))
 
-                #Mirror, Mirror of the Flow: How Does Regularization Shape Implicit Bias?
-                #https://arxiv.org/abs/2504.12883
+                if group["lr_bump"] > 0:
+                    lr_mask_i = state["lr_mask"]
+                    last_polarity = state["last_polarity"]
+                    current_polarity = (grad > 0)
+
+                    same = (last_polarity == current_polarity)
+                    state["last_polarity"] = current_polarity
+
+                    # Update mask
+                    lr_adjust = torch.where(same, int(group["lr_bump"]), -int(group["lr_bump"]))
+                    lr_mask_i.add_(lr_adjust.to(torch.int16)).clamp_(
+                        min=int(group["min_lr"]),
+                        max=int(group["max_lr"]),
+                    )
+
+                    mask_f = lr_mask_i.to(p.dtype) * 0.01
+                    if "lr_max_val" not in state:
+                        state["lr_max_val"] = base_lr
+                    state["lr_max_val"] = max(base_lr, state["lr_max_val"])
+
+                    # For display (no allora)
+                    lr_no_allora = (base_lr * mask_f).clamp(min=state["lr_max_val"] * 0.1)
+                    state["avg_lr_no_allora"] = float(lr_no_allora.mean().item())
+
+                    # For actual update (with allora)
+                    lr_to_use = lr_no_allora * allora_scaling
+                else:
+                    state["avg_lr_no_allora"] = base_lr
+                    lr_to_use = base_lr * allora_scaling
+
+                # Adaptive Weight Decay
                 if use_weight_decay:
-                    #Adaptive Weight Decay for Deep Neural Networks
-                    #https://arxiv.org/abs/1907.08931
-                    param_abs_grad = torch.abs(grad).mean()
+                    abs_grad = grad.abs()
+                    param_abs_grad = abs_grad.mean()
                     norm_grad = (param_abs_grad - mean_norm) / std_norm
-                    ada_alpha = 4
-                    theta = 2 / (1 + torch.exp(-ada_alpha * norm_grad))
-                    p_fp32.data.mul_(1 - (lr * group["weight_decay"] * theta))
+                    ada_alpha = 4.0
+                    theta = 2.0 / (1.0 + torch.exp(-ada_alpha * norm_grad))
+                    # lr_to_use can be a Tensor, mul_ supports broadcasting
+                    p_fp32.data.mul_(1 - (lr_to_use * group["weight_decay"] * theta))
 
-                p_fp32.add_(-update.mul(lr))
+                # Parameter Update with Kahan Summation Support
+
+                # Calculate the exact update value (supports both float and tensor LR)
+                if isinstance(lr_to_use, torch.Tensor):
+                    update_val = update * lr_to_use
+                else:
+                    update_val = update * lr_to_use
+
+                if group.get("use_kahan", False):
+                    kahan_comp = state["kahan_comp"]
+
+                    # 1. Compensate: Subtract the previous error from the update
+                    # We want to perform: p = p - update_val
+                    # Let y = -update_val - comp
+                    vals_to_add = -update_val
+                    compensated_update = vals_to_add - kahan_comp
+
+                    # 2. Accumulate: Add to weights (precision loss happens here)
+                    # t = p + y
+                    new_param = p_fp32.data + compensated_update
+
+                    # 3. Measure Error: Calculate what was lost
+                    # new_comp = (t - p) - y
+                    new_comp = (new_param - p_fp32.data) - compensated_update
+                    kahan_comp.copy_(new_comp)
+
+                    # 4. Update Weight
+                    p_fp32.data.copy_(new_param)
+                else:
+                    # Standard Update
+                    p_fp32.data.add_(-update_val)
 
                 copy_stochastic(p.data, p_fp32.data)
 
+        self._step += 1
         return loss
