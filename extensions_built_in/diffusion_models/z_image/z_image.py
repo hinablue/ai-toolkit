@@ -334,7 +334,11 @@ class ZImageModel(BaseModel):
         timestep_model_input = (1000 - timestep) / 1000
 
         text_embeds = text_embeddings.text_embeds
-        if isinstance(text_embeds, list):
+        if isinstance(text_embeds, torch.Tensor):
+            if len(text_embeds.shape) == 3:
+                # if it is a single batch tensor, unbind it into a list of tensors
+                text_embeds = list(text_embeds.unbind(dim=0))
+        elif isinstance(text_embeds, list):
             # check if items are rank 3 (batch, length, dim)
             if len(text_embeds[0].shape) == 3:
                 # flatten the list of batches into a single list of tensors
