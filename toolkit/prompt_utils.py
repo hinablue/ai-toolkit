@@ -288,6 +288,7 @@ def concat_prompt_embeds(prompt_embeds: list["PromptEmbeds"]):
     # --- pooled embeds ---
     pooled_embeds = None
     if prompt_embeds[0].pooled_embeds is not None:
+        # check if it is Z-Image style, list or tuple.
         if isinstance(prompt_embeds[0].pooled_embeds, (list, tuple)):
             pooled_embeds = []
             for p in prompt_embeds:
@@ -298,6 +299,7 @@ def concat_prompt_embeds(prompt_embeds: list["PromptEmbeds"]):
     # --- attention mask ---
     attention_mask = None
     if prompt_embeds[0].attention_mask is not None:
+        # check if it is Z-Image style, list or tuple.
         if isinstance(prompt_embeds[0].attention_mask, (list, tuple)):
             attention_mask = []
             for p in prompt_embeds:
