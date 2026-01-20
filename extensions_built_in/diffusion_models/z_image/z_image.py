@@ -18,7 +18,7 @@ from toolkit.util.quantize import quantize, get_qtype, quantize_model
 from toolkit.memory_management import MemoryManager
 from safetensors.torch import load_file
 
-from transformers import AutoTokenizer, Qwen3ForCausalLM
+from transformers import AutoTokenizer, Qwen3ForCausalLM, BitsAndBytesConfig
 from diffusers import AutoencoderKL
 
 try:
@@ -276,8 +276,20 @@ class ZImageModel(BaseModel):
         tokenizer = AutoTokenizer.from_pretrained(
             base_model_path, subfolder="tokenizer", torch_dtype=dtype
         )
+
+        te_kwargs = {}
+        if self.model_config.quantize_te and self.model_config.qtype_te == "nf4":
+            self.print_and_status_update("Loading Text Encoder in 4-bit (nf4)")
+            te_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=dtype,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            te_kwargs["device_map"] = self.device_torch
+
         text_encoder = Qwen3ForCausalLM.from_pretrained(
-            base_model_path, subfolder="text_encoder", torch_dtype=dtype
+            base_model_path, subfolder="text_encoder", torch_dtype=dtype, **te_kwargs
         )
 
         if (
@@ -290,12 +302,14 @@ class ZImageModel(BaseModel):
                 offload_percent=self.model_config.layer_offloading_text_encoder_percent,
             )
 
-        text_encoder.to(self.device_torch, dtype=dtype)
-        flush()
+        if self.model_config.quantize_te and self.model_config.qtype_te != "nf4":
+            text_encoder.to(self.device_torch, dtype=dtype)
+            flush()
 
-        if self.model_config.quantize_te:
             self.print_and_status_update("Quantizing Text Encoder")
             quantize(text_encoder, weights=get_qtype(self.model_config.qtype_te))
+
+        if self.model_config.quantize_te:
             freeze(text_encoder)
             flush()
 
