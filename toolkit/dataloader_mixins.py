@@ -390,6 +390,12 @@ class CaptionProcessingDTOMixin:
                 # drop the caption
                 return ''
 
+        if self.dataset_config.enable_wildcard:
+            _caption = raw_caption.splitlines()
+            _caption = [caption.strip() for caption in _caption if caption.strip()]
+            if len(_caption) > 1:
+                raw_caption = random.choice(_caption)
+
         # get tokens
         token_list = raw_caption.split(',')
         # trim whitespace
@@ -2042,6 +2048,15 @@ class TextEmbeddingCachingMixin:
                             ctrl_img = ctrl_img_list
                         prompt_embeds: PromptEmbeds = self.sd.encode_prompt(file_item.caption, control_images=ctrl_img)
                     else:
+                        # If self.dataset_config.enable_wildcard is True, split the file_item.caption with new lines
+                        # and shuffle the list of captions then encode the first item.
+                        if self.dataset_config.enable_wildcard:
+                            captions = file_item.caption.splitlines()
+                            captions = [caption.strip() for caption in captions if caption.strip()]
+                            if len(captions) > 1:
+                                random.shuffle(captions)
+                                file_item.caption = captions[0]
+
                         prompt_embeds: PromptEmbeds = self.sd.encode_prompt(file_item.caption)
                     # save it
                     prompt_embeds.save(text_embedding_path)

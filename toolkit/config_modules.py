@@ -863,6 +863,7 @@ class DatasetConfig:
         self.network_weight: float = float(kwargs.get('network_weight', 1.0))
         self.token_dropout_rate: float = float(kwargs.get('token_dropout_rate', 0.0))
         self.shuffle_tokens: bool = kwargs.get('shuffle_tokens', False)
+        self.enable_wildcard: bool = kwargs.get('enable_wildcard', False)
         self.caption_dropout_rate: float = float(kwargs.get('caption_dropout_rate', 0.0))
         self.keep_tokens: int = kwargs.get('keep_tokens', 0)  # #of first tokens to always keep unless caption dropped
         self.flip_x: bool = kwargs.get('flip_x', False)

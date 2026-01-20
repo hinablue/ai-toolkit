@@ -88,6 +88,7 @@ export interface DatasetConfig {
   caption_ext: string;
   caption_dropout_rate: number;
   shuffle_tokens?: boolean;
+  enable_wildcard?: boolean;
   is_reg: boolean;
   network_weight: number;
   cache_latents_to_disk?: boolean;
