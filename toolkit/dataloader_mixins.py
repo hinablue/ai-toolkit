@@ -390,11 +390,13 @@ class CaptionProcessingDTOMixin:
                 # drop the caption
                 return ''
 
-        if self.dataset_config.enable_wildcard:
-            _caption = raw_caption.splitlines()
-            _caption = [caption.strip() for caption in _caption if caption.strip()]
-            if len(_caption) > 1:
+        _caption = raw_caption.splitlines()
+        _caption = [caption.strip() for caption in _caption if caption.strip()]
+        if len(_caption) > 1:
+            if self.dataset_config.enable_wildcard:
                 raw_caption = random.choice(_caption)
+            else:
+                raw_caption = _caption[0]
 
         # get tokens
         token_list = raw_caption.split(',')
