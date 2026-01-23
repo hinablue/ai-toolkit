@@ -126,6 +126,7 @@ export interface TrainConfig {
   noise_scheduler: string;
   timestep_type: string;
   content_or_style: string;
+  content_or_style_reg?: string;
   optimizer: string;
   lr: number;
   ema_config?: EMAConfig;

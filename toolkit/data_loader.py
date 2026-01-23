@@ -425,7 +425,15 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             if self.is_video:
                 # only look for videos
                 extensions = video_extensions
-            file_list = [os.path.join(root, file) for root, _, files in os.walk(self.dataset_path) for file in files if file.lower().endswith(tuple(extensions))]
+            file_list = []
+            for root, dirs, files in os.walk(self.dataset_path):
+                if self.dataset_config.skip_folder:
+                    # modify dirs in place to skip folders
+                    dirs[:] = [d for d in dirs if d not in self.dataset_config.skip_folder]
+
+                for file in files:
+                    if file.lower().endswith(tuple(extensions)):
+                        file_list.append(os.path.join(root, file))
         else:
             # assume json
             with open(self.dataset_path, 'r') as f:
@@ -435,6 +443,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 
         # remove items in the _controls_ folder
         file_list = [x for x in file_list if not os.path.basename(os.path.dirname(x)) == "_controls"]
+
+        if self.dataset_config.skip_folder:
+            file_list = [x for x in file_list if not any(skip in x.split(os.sep) for skip in self.dataset_config.skip_folder)]
 
         if self.dataset_config.num_repeats > 1:
             # repeat the list
