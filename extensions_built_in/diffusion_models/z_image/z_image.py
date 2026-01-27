@@ -36,72 +36,6 @@ scheduler_config = {
     "shift": 3.0,
 }
 
-# FP16 stability patches
-# Ref: https://github.com/kohya-ss/musubi-tuner/pull/795
-
-def clamp_fp16(x):
-    """
-    Clamps the tensor to the valid range of FP16 to avoid Inf/NaN.
-    Typical max value for FP16 is 65504.
-    """
-    if x.dtype == torch.float16:
-        return torch.nan_to_num(x, nan=0.0, posinf=65504, neginf=-65504)
-    return x
-
-
-def apply_z_image_fp16_patches(model):
-    """
-    Applies Forward Hooks and Pre-Hooks to Z-Image modules to enforce FP16 clamping.
-    This mimics the stability fixes in the Musubi Tuner implementation without rewriting the model definition.
-    """
-    print("Applying proper FP16 clamping patches to ZImage Transformer")
-
-    def clamp_output_hook(module, args, output):
-        # Clamps the module output
-        return clamp_fp16(output)
-
-    def clamp_input_pre_hook(module, args):
-        # Clamps the first argument of the module input
-        if len(args) > 0:
-            x = args[0]
-            # Verify it's a tensor before clamping (though usually it is for these layers)
-            if isinstance(x, torch.Tensor):
-                return (clamp_fp16(x),) + args[1:]
-        return args
-
-    # Helper to patch a standard ZImage block
-    def patch_block(block):
-        # 1. Patch Attention Output
-        # Prevents NaN propagation into the residual connection
-        if hasattr(block, "attention"):
-            block.attention.register_forward_hook(clamp_output_hook)
-
-        # 2. Patch FeedForward
-        if hasattr(block, "feed_forward"):
-            # Patch FFN Output
-            block.feed_forward.register_forward_hook(clamp_output_hook)
-
-            # Patch FFN Internal (before w2/down_proj)
-            # In the reference implementation: return self.w2(clamp_fp16(F.silu(self.w1(x)) * x3))
-            # We hook into w2 to clamp its input.
-            if hasattr(block.feed_forward, "w2"):
-                block.feed_forward.w2.register_forward_pre_hook(clamp_input_pre_hook)
-
-    # Patch Main Layers
-    if hasattr(model, "layers"):
-        for layer in model.layers:
-            patch_block(layer)
-
-    # Patch Noise Refiner Layers (if present)
-    if hasattr(model, "noise_refiner"):
-        for layer in model.noise_refiner:
-            patch_block(layer)
-
-    # Patch Context Refiner Layers (if present)
-    if hasattr(model, "context_refiner"):
-        for layer in model.context_refiner:
-            patch_block(layer)
-
 
 class ZImageModel(BaseModel):
     arch = "zimage"
@@ -235,10 +169,6 @@ class ZImageModel(BaseModel):
         transformer = ZImageTransformer2DModel.from_pretrained(
             transformer_path, subfolder=transformer_subfolder, torch_dtype=dtype
         )
-
-        # Apply FP16 stability patches (hooks) only if using fp16
-        if dtype == torch.float16:
-            apply_z_image_fp16_patches(transformer)
 
         # load assistant lora if specified
         if self.model_config.assistant_lora_path is not None:
@@ -454,6 +384,25 @@ class ZImageModel(BaseModel):
             do_classifier_free_guidance=False,
             device=self.device_torch,
         )
+        # encode_prompt returns list of rank-2 tensors [seq_len, dim]
+        # Pad to same length and stack into rank-3 tensor [batch, seq_len, dim]
+        # for compatibility with concat_prompt_embeds and predict_noise
+        if isinstance(prompt_embeds, list):
+            # Find max sequence length, TODO: Or just use 512?
+            max_seq_len = max(t.shape[0] for t in prompt_embeds)
+            print(f"max_seq_len: {max_seq_len}")
+            # Pad each tensor to max length
+            padded = []
+            for t in prompt_embeds:
+                if t.shape[0] < max_seq_len:
+                    pad = torch.zeros(
+                        (max_seq_len - t.shape[0], t.shape[1]),
+                        dtype=t.dtype,
+                        device=t.device,
+                    )
+                    t = torch.cat([t, pad], dim=0)
+                padded.append(t)
+            prompt_embeds = torch.stack(padded, dim=0)
         pe = PromptEmbeds([prompt_embeds, None])
         return pe
 
