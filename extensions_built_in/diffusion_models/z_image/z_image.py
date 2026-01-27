@@ -454,6 +454,25 @@ class ZImageModel(BaseModel):
             do_classifier_free_guidance=False,
             device=self.device_torch,
         )
+        # encode_prompt returns list of rank-2 tensors [seq_len, dim]
+        # Pad to same length and stack into rank-3 tensor [batch, seq_len, dim]
+        # for compatibility with concat_prompt_embeds and predict_noise
+        if isinstance(prompt_embeds, list):
+            # Find max sequence length, TODO: Or just use 512?
+            max_seq_len = max(t.shape[0] for t in prompt_embeds)
+            print(f"max_seq_len: {max_seq_len}")
+            # Pad each tensor to max length
+            padded = []
+            for t in prompt_embeds:
+                if t.shape[0] < max_seq_len:
+                    pad = torch.zeros(
+                        (max_seq_len - t.shape[0], t.shape[1]),
+                        dtype=t.dtype,
+                        device=t.device,
+                    )
+                    t = torch.cat([t, pad], dim=0)
+                padded.append(t)
+            prompt_embeds = torch.stack(padded, dim=0)
         pe = PromptEmbeds([prompt_embeds, None])
         return pe
 
