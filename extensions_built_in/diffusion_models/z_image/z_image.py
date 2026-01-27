@@ -460,7 +460,6 @@ class ZImageModel(BaseModel):
         if isinstance(prompt_embeds, list):
             # Find max sequence length, TODO: Or just use 512?
             max_seq_len = max(t.shape[0] for t in prompt_embeds)
-            print(f"max_seq_len: {max_seq_len}")
             # Pad each tensor to max length
             padded = []
             for t in prompt_embeds:
