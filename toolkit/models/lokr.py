@@ -87,10 +87,18 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         dropout=0.,
         rank_dropout=0.,
         module_dropout=0.,
-        use_cp=False,
+        use_tucker=False,
+        use_scalar=False,
         decompose_both=False,
         network: 'LoRASpecialNetwork' = None,
         factor: int = -1,  # factorization factor
+        rank_dropout_scale=False,
+        weight_decompose=False,
+        wd_on_out=True,
+        full_matrix=False,
+        bypass_mode=None,
+        rs_lora=False,
+        unbalanced_factorization=False,
         **kwargs,
     ):
         """ if alpha == 0 or None, alpha is rank (no scaling). """
@@ -103,6 +111,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.use_w1 = False
         self.use_w2 = False
         self.can_merge_in = True
+        self.bypass_mode = bypass_mode
 
         self.shape = org_module.weight.shape
         if org_module.__class__.__name__ == 'Conv2d':
@@ -115,8 +124,12 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             # ((a, b), (c, d), *k_size)
             shape = ((out_l, out_k), (in_m, in_n), *k_size)
 
-            self.cp = use_cp and k_size != (1, 1)
-            if decompose_both and lora_dim < max(shape[0][0], shape[1][0])/2:
+            self.tucker = use_tucker and any(i != 1 for i in k_size)
+            if (
+                decompose_both
+                and lora_dim < max(shape[0][0], shape[1][0])/2
+                and not full_matrix
+            ):
                 self.lokr_w1_a = nn.Parameter(
                     torch.empty(shape[0][0], lora_dim))
                 self.lokr_w1_b = nn.Parameter(
@@ -126,18 +139,19 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
                 self.lokr_w1 = nn.Parameter(torch.empty(
                     shape[0][0], shape[1][0]))  # a*c, 1-mode
 
-            if lora_dim >= max(shape[0][1], shape[1][1])/2:
+            if lora_dim >= max(shape[0][1], shape[1][1])/2 or full_matrix:
                 self.use_w2 = True
                 self.lokr_w2 = nn.Parameter(torch.empty(
                     shape[0][1], shape[1][1], *k_size))
-            elif self.cp:
-                self.lokr_t2 = nn.Parameter(torch.empty(
-                    lora_dim, lora_dim, shape[2], shape[3]))
+            elif self.tucker:
+                self.lokr_t2 = nn.Parameter(torch.empty(lora_dim, lora_dim, *shape[2:]))
                 self.lokr_w2_a = nn.Parameter(
-                    torch.empty(lora_dim, shape[0][1]))  # b, 1-mode
+                    torch.empty(lora_dim, shape[0][1])
+                )  # b, 1-mode
                 self.lokr_w2_b = nn.Parameter(
-                    torch.empty(lora_dim, shape[1][1]))  # d, 2-mode
-            else:  # Conv2d not cp
+                    torch.empty(lora_dim, shape[1][1])
+                )  # d, 2-mode
+            else:  # Conv2d not tucker
                 # bigger part. weight and LoRA. [b, dim] x [dim, d*k1*k2]
                 self.lokr_w2_a = nn.Parameter(
                     torch.empty(shape[0][1], lora_dim))
@@ -159,11 +173,18 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
             in_m, in_n = factorization(in_dim, factor)
             out_l, out_k = factorization(out_dim, factor)
-            # ((a, b), (c, d)), out_dim = a*c, in_dim = b*d
-            shape = ((out_l, out_k), (in_m, in_n))
-
+            if unbalanced_factorization:
+                out_l, out_k = out_k, out_l
+            shape = (
+                (out_l, out_k),
+                (in_m, in_n),
+            )  # ((a, b), (c, d)), out_dim = a*c, in_dim = b*d
             # smaller part. weight scale
-            if decompose_both and lora_dim < max(shape[0][0], shape[1][0])/2:
+            if (
+                decompose_both
+                and lora_dim < max(shape[0][0], shape[1][0]) / 2
+                and not full_matrix
+            ):
                 self.lokr_w1_a = nn.Parameter(
                     torch.empty(shape[0][0], lora_dim))
                 self.lokr_w1_b = nn.Parameter(
@@ -188,10 +209,35 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             self.op = F.linear
             self.extra_args = {}
 
+        self.wd = weight_decompose
+        self.wd_on_out = wd_on_out
+        if self.wd:
+            org_weight = org_module.weight.cpu().clone().float()
+            self.dora_norm_dims = org_weight.dim() - 1
+            if self.wd_on_out:
+                self.dora_scale = nn.Parameter(
+                    torch.norm(
+                        org_weight.reshape(org_weight.shape[0], -1),
+                        dim=1,
+                        keepdim=True,
+                    ).reshape(org_weight.shape[0], *[1] * self.dora_norm_dims)
+                ).float()
+            else:
+                self.dora_scale = nn.Parameter(
+                    torch.norm(
+                        org_weight.transpose(1, 0).reshape(org_weight.shape[1], -1),
+                        dim=1,
+                        keepdim=True,
+                    )
+                    .reshape(org_weight.shape[1], *[1] * self.dora_norm_dims)
+                    .transpose(1, 0)
+                ).float()
+
         self.dropout = dropout
         if dropout:
             print("[WARN]LoKr haven't implemented normal dropout yet.")
         self.rank_dropout = rank_dropout
+        self.rank_dropout_scale = rank_dropout_scale
         self.module_dropout = module_dropout
 
         if isinstance(alpha, torch.Tensor):
@@ -200,16 +246,32 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         if self.use_w2 and self.use_w1:
             # use scale = 1
             alpha = lora_dim
-        self.scale = alpha / self.lora_dim
-        self.register_buffer('alpha', torch.tensor(alpha))  # treat as constant
+
+        r_factor = lora_dim
+        if rs_lora:
+            r_factor = math.sqrt(r_factor)
+
+        self.scale = alpha / r_factor
+        self.register_buffer("alpha", torch.tensor(alpha * (lora_dim / r_factor)))
+
+        if use_scalar:
+            self.scalar = nn.Parameter(torch.tensor(0.0))
+        else:
+            self.register_buffer("scalar", torch.tensor(1.0), persistent=False)
 
         if self.use_w2:
-            torch.nn.init.constant_(self.lokr_w2, 0)
+            if use_scalar:
+                torch.nn.init.kaiming_uniform_(self.lokr_w2, a=math.sqrt(5))
+            else:
+                torch.nn.init.constant_(self.lokr_w2, 0)
         else:
-            if self.cp:
+            if self.tucker:
                 torch.nn.init.kaiming_uniform_(self.lokr_t2, a=math.sqrt(5))
             torch.nn.init.kaiming_uniform_(self.lokr_w2_a, a=math.sqrt(5))
-            torch.nn.init.constant_(self.lokr_w2_b, 0)
+            if use_scalar:
+                torch.nn.init.kaiming_uniform_(self.lokr_w2_b, a=math.sqrt(5))
+            else:
+                torch.nn.init.constant_(self.lokr_w2_b, 0)
 
         if self.use_w1:
             torch.nn.init.kaiming_uniform_(self.lokr_w1, a=math.sqrt(5))
@@ -219,11 +281,18 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
         self.multiplier = multiplier
         self.org_module = [org_module]
+
         weight = make_kron(
-            self.lokr_w1 if self.use_w1 else self.lokr_w1_a@self.lokr_w1_b,
-            (self.lokr_w2 if self.use_w2
-             else make_weight_cp(self.lokr_t2, self.lokr_w2_a, self.lokr_w2_b) if self.cp
-             else self.lokr_w2_a@self.lokr_w2_b),
+            self.lokr_w1 if self.use_w1 else self.lokr_w1_a @ self.lokr_w1_b,
+            (
+                self.lokr_w2
+                if self.use_w2
+                else (
+                    rebuild_tucker(self.lokr_t2, self.lokr_w2_a, self.lokr_w2_b)
+                    if self.tucker
+                    else self.lokr_w2_a @ self.lokr_w2_b
+                )
+            ),
             torch.tensor(self.multiplier * self.scale)
         )
         assert torch.sum(torch.isnan(weight)) == 0, "weight is nan"
@@ -235,18 +304,27 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
     def get_weight(self, orig_weight=None):
         weight = make_kron(
-            self.lokr_w1 if self.use_w1 else self.lokr_w1_a@self.lokr_w1_b,
-            (self.lokr_w2 if self.use_w2
-             else make_weight_cp(self.lokr_t2, self.lokr_w2_a, self.lokr_w2_b) if self.cp
-             else self.lokr_w2_a@self.lokr_w2_b),
-            torch.tensor(self.scale)
+            self.lokr_w1 if self.use_w1 else self.lokr_w1_a @ self.lokr_w1_b,
+            (
+                self.lokr_w2
+                if self.use_w2
+                else (
+                    rebuild_tucker(self.lokr_t2, self.lokr_w2_a, self.lokr_w2_b)
+                    if self.tucker
+                    else self.lokr_w2_a @ self.lokr_w2_b
+                )
+            ),
+            self.scale,
         )
-        if orig_weight is not None:
-            weight = weight.reshape(orig_weight.shape)
+        dtype = weight.dtype
+        if self.shape is not None:
+            weight = weight.view(self.shape)
         if self.training and self.rank_dropout:
-            drop = torch.rand(weight.size(0)) < self.rank_dropout
-            weight *= drop.view(-1, [1] *
-                                len(weight.shape[1:])).to(weight.device)
+            drop = (torch.rand(weight.size(0)) > self.rank_dropout).to(dtype)
+            drop = drop.view(-1, *[1] * len(weight.shape[1:]))
+            if self.rank_dropout_scale:
+                drop /= drop.mean()
+            weight *= drop
         return weight
 
     @torch.no_grad()
@@ -309,6 +387,81 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
                 return self.org_module[0].bias.data.detach()
         return None
 
+    def bypass_forward_diff(self, h, scale=1):
+        is_conv = self.org_module[0].__class__.__name__ == 'Conv2d'
+        if self.use_w2:
+            ba = self.lokr_w2
+        else:
+            a = self.lokr_w2_b
+            b = self.lokr_w2_a
+
+            if self.tucker:
+                t = self.lokr_t2
+                a = a.view(*a.shape, *[1] * (len(t.shape) - 2))
+                b = b.view(*b.shape, *[1] * (len(t.shape) - 2))
+            elif is_conv:
+                a = a.view(*a.shape, *self.shape[2:])
+                b = b.view(*b.shape, *[1] * (len(self.shape) - 2))
+
+        if self.use_w1:
+            c = self.lokr_w1
+        else:
+            c = self.lokr_w1_a @ self.lokr_w1_b
+        uq = c.size(1)
+
+        if is_conv:
+            # (b, uq), vq, ...
+            b, _, *rest = h.shape
+            h_in_group = h.reshape(b * uq, -1, *rest)
+        else:
+            # b, ..., uq, vq
+            h_in_group = h.reshape(*h.shape[:-1], uq, -1)
+
+        if self.use_w2:
+            hb = self.op(h_in_group, ba, **self.extra_args)
+        else:
+            if is_conv:
+                if self.tucker:
+                    ha = self.op(h_in_group, a)
+                    ht = self.op(ha, t, **self.extra_args)
+                    hb = self.op(ht, b)
+                else:
+                    ha = self.op(h_in_group, a, **self.extra_args)
+                    hb = self.op(ha, b)
+            else:
+                ha = self.op(h_in_group, a, **self.extra_args)
+                hb = self.op(ha, b)
+
+        if is_conv:
+            # (b, uq), vp, ..., f
+            # -> b, uq, vp, ..., f
+            # -> b, f, vp, ..., uq
+            hb = hb.view(b, -1, *hb.shape[1:])
+            h_cross_group = hb.transpose(1, -1)
+        else:
+            # b, ..., uq, vq
+            # -> b, ..., vq, uq
+            h_cross_group = hb.transpose(-1, -2)
+
+        hc = F.linear(h_cross_group, c)
+        if is_conv:
+            # b, f, vp, ..., up
+            # -> b, up, vp, ... ,f
+            # -> b, c, ..., f
+            hc = hc.transpose(1, -1)
+            h = hc.reshape(b, -1, *hc.shape[3:])
+        else:
+            # b, ..., vp, up
+            # -> b, ..., up, vp
+            # -> b, ..., c
+            hc = hc.transpose(-1, -2)
+            h = hc.reshape(*hc.shape[:-2], -1)
+
+        return self.drop(h * scale * self.scalar)
+        
+    def bypass_forward(self, x, scale=1):
+        return self.org_forward(x) + self.bypass_forward_diff(x, scale=scale)
+
     def _call_forward(self, x):
         if isinstance(x, QTensor) or isinstance(x, QBytesTensor):
             x = x.dequantize()
@@ -318,33 +471,30 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         # or just generally different from the lora
         base_output = self.org_forward(x)
 
-        # get the loakr weight
-        # we don't pass the orig_weight as we want to use the valid shape
-        # and we don't want to force the dtype
-        lokr_weight = self.get_weight(orig_weight=None)
+        if self.module_dropout and self.training:
+            if torch.rand(1) < self.module_dropout:
+                return base_output
+
+        if self.bypass_mode:
+            return self.bypass_forward(x, self.multiplier)
+
+        base_weight = self.get_orig_weight(x.device)
+        diff_weight = self.get_weight(orig_weight=None)
         
-        # cast to x dtype
-        if lokr_weight.dtype != x.dtype:
-            lokr_weight = lokr_weight.to(dtype=x.dtype)
+        if diff_weight.dtype != x.dtype:
+            diff_weight = diff_weight.to(dtype=x.dtype)
 
-        # reshape to the correct shape
-        lokr_weight = lokr_weight.view(self.shape)
+        diff_weight = diff_weight.view(self.shape) * self.scalar
 
-        multiplier = self.network_ref().torch_multiplier
-        
-        # we do not currently support split batch multipliers for lokr. Just do a mean
-        multiplier = torch.mean(multiplier)
+        if self.wd:
+            new_weight = self.apply_weight_decompose(
+                base_weight + diff_weight, self.multiplier
+            )
+        elif self.multiplier == 1:
+            new_weight = base_weight + diff_weight
+        else:
+            new_weight = base_weight + diff_weight * self.multiplier
 
-        # calculate the delta
-        # we don't include the bias as it is already in the base output
-        delta_output = self.op(
-            x,
-            lokr_weight,
-            None,
-            **self.extra_args
-        )
-        
-        # add the delta to the base output
-        output = base_output + delta_output * multiplier
-
-        return output
+        delta_weight = new_weight - base_weight
+        delta = self.op(x, delta_weight, None, **self.extra_args)
+        return base_output + delta

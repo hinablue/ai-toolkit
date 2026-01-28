@@ -436,6 +436,18 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                             
                             if self.network_type.lower() == "lokr":
                                 module_kwargs["factor"] = self.network_config.lokr_factor
+                                module_kwargs["full_matrix"] = self.network_config.lokr_full_rank
+
+                                module_kwargs["use_tucker"] = self.network_config.network_kwargs.get("use_tucker", False)
+                                module_kwargs["use_scalar"] = self.network_config.network_kwargs.get("use_scalar", False)
+                                module_kwargs["decompose_both"] = self.network_config.network_kwargs.get("decompose_both", False)
+                                module_kwargs["rank_dropout_scale"] = self.network_config.network_kwargs.get("rank_dropout_scale", False)
+                                module_kwargs["weight_decompose"] = self.network_config.network_kwargs.get("weight_decompose", False)
+                                module_kwargs["wd_on_out"] = self.network_config.network_kwargs.get("wd_on_out", True)
+                                module_kwargs["bypass_mode"] = self.network_config.network_kwargs.get("bypass_mode", False)
+                                module_kwargs["train_norm"] = self.network_config.network_kwargs.get("train_norm", False)
+                                module_kwargs["rs_lora"] = self.network_config.network_kwargs.get("rs_lora", False)
+                                module_kwargs["unbalanced_factorization"] = self.network_config.network_kwargs.get("unbalanced_factorization", False)
                             
                             if self.is_ara:
                                 module_kwargs["is_ara"] = True
