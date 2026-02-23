@@ -10,7 +10,37 @@ def get_optimizer(
     if optimizer_params is None:
         optimizer_params = {}
     lower_type = optimizer_type.lower()
-    if lower_type.startswith("dadaptation"):
+    if lower_type.endswith("_adv"):
+        if lower_type.startswith("prodigy"):
+            from adv_optm import Prodigy_adv
+            optimizer = Prodigy_adv(params, lr=float(learning_rate), **optimizer_params)
+        elif lower_type.startswith("adamw"):
+            from adv_optm import AdamW_adv
+            optimizer = AdamW_adv(params, lr=float(learning_rate), **optimizer_params)
+        elif lower_type.startswith("adopt"):
+            from adv_optm import Adopt_adv
+            optimizer = Adopt_adv(params, lr=float(learning_rate), **optimizer_params)
+        elif lower_type.startswith("lion"):
+            from adv_optm import Lion_adv
+            optimizer = Lion_adv(params, lr=float(learning_rate), **optimizer_params)
+        elif lower_type.startswith("lion_prodigy"):
+            from adv_optm import Lion_Prodigy_adv
+            optimizer = Lion_Prodigy_adv(params, lr=float(learning_rate), **optimizer_params)
+        elif lower_type.startswith("muon"):
+            from adv_optm import Muon_adv
+            optimizer = Muon_adv(params, lr=float(learning_rate), **optimizer_params)
+        elif lower_type.startswith("adamuon"):
+            from adv_optm import AdaMuon_adv
+            optimizer = AdaMuon_adv(params, lr=float(learning_rate), **optimizer_params)
+        elif lower_type.startswith("signsgd"):
+            from adv_optm import SignSGD_adv
+            optimizer = SignSGD_adv(params, lr=float(learning_rate), **optimizer_params)
+        else:
+            raise ValueError(f'Unknown optimizer type {optimizer_type}')
+    elif lower_type == 'simplified_ademamix':
+        from adv_optm import Simplified_AdEMAMix
+        optimizer = Simplified_AdEMAMix(params, lr=float(learning_rate), **optimizer_params)
+    elif lower_type.startswith("dadaptation"):
         # dadaptation optimizer does not use standard learning rate. 1 is the default value
         import dadaptation
         print("Using DAdaptAdam optimizer")
@@ -103,36 +133,6 @@ def get_optimizer(
     elif lower_type == 'hina_adaptive':
         from toolkit.optimizers.hina_adaptive import Hina_Adaptive
         optimizer = Hina_Adaptive(params, lr=float(learning_rate), **optimizer_params)
-    elif lower_type.endswith("_adv"):
-        if lower_type.startswith("prodigy"):
-            from adv_optm import Prodigy_adv
-            optimizer = Prodigy_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("adamw"):
-            from adv_optm import AdamW_adv
-            optimizer = AdamW_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("adopt"):
-            from adv_optm import Adopt_adv
-            optimizer = Adopt_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("lion"):
-            from adv_optm import Lion_adv
-            optimizer = Lion_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("lion_prodigy"):
-            from adv_optm import Lion_Prodigy_adv
-            optimizer = Lion_Prodigy_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("muon"):
-            from adv_optm import Muon_adv
-            optimizer = Muon_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("adamuon"):
-            from adv_optm import AdaMuon_adv
-            optimizer = AdaMuon_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("signsgd"):
-            from adv_optm import SignSGD_adv
-            optimizer = SignSGD_adv(params, lr=float(learning_rate), **optimizer_params)
-        else:
-            raise ValueError(f'Unknown optimizer type {optimizer_type}')
-    elif lower_type == 'simplified_ademamix':
-        from adv_optm import Simplified_AdEMAMix
-        optimizer = Simplified_AdEMAMix(params, lr=float(learning_rate), **optimizer_params)
     else:
         raise ValueError(f'Unknown optimizer type {optimizer_type}')
     return optimizer
