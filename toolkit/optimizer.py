@@ -13,7 +13,18 @@ def get_optimizer(
     if lower_type.endswith("_adv"):
         if lower_type.startswith("prodigy"):
             from adv_optm import Prodigy_adv
-            optimizer = Prodigy_adv(params, lr=float(learning_rate), **optimizer_params)
+            use_lr = learning_rate
+            if use_lr < 0.1:
+                # dadaptation uses different lr that is values of 0.1 to 1.0. default to 1.0
+                use_lr = 1.0
+            optimizer = Prodigy_adv(params, lr=float(use_lr), **optimizer_params)
+        elif lower_type.startswith("lion_prodigy"):
+            from adv_optm import Lion_Prodigy_adv
+            use_lr = learning_rate
+            if use_lr < 0.1:
+                # dadaptation uses different lr that is values of 0.1 to 1.0. default to 1.0
+                use_lr = 1.0
+            optimizer = Lion_Prodigy_adv(params, lr=float(use_lr), **optimizer_params)
         elif lower_type.startswith("adamw"):
             from adv_optm import AdamW_adv
             optimizer = AdamW_adv(params, lr=float(learning_rate), **optimizer_params)
@@ -23,9 +34,6 @@ def get_optimizer(
         elif lower_type.startswith("lion"):
             from adv_optm import Lion_adv
             optimizer = Lion_adv(params, lr=float(learning_rate), **optimizer_params)
-        elif lower_type.startswith("lion_prodigy"):
-            from adv_optm import Lion_Prodigy_adv
-            optimizer = Lion_Prodigy_adv(params, lr=float(learning_rate), **optimizer_params)
         elif lower_type.startswith("muon"):
             from adv_optm import Muon_adv
             optimizer = Muon_adv(params, lr=float(learning_rate), **optimizer_params)
