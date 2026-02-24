@@ -40,17 +40,28 @@ class Flux2KleinModel(Flux2Model):
         dtype = self.torch_dtype
         self.print_and_status_update("Loading Qwen3")
 
-        text_encoder: Qwen3ForCausalLM = Qwen3ForCausalLM.from_pretrained(
-            self.flux2_klein_te_path,
-            torch_dtype=dtype,
+        te_kwargs = {}
+        if self.model_config.quantize_te and self.model_config.qtype_te == "nf4":
+            self.print_and_status_update("Loading Text Encoder in 4-bit (nf4)")
+            te_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=dtype,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            te_kwargs["device_map"] = self.device_torch
+
+        text_encoder = Qwen3ForCausalLM.from_pretrained(
+            self.flux2_klein_te_path, torch_dtype=dtype, **te_kwargs
         )
-        text_encoder.to(self.device_torch, dtype=dtype)
 
         flush()
 
-        if self.model_config.quantize_te:
+        if self.model_config.quantize_te and self.model_config.qtype_te != "nf4":
             self.print_and_status_update("Quantizing Qwen3")
             quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
+
+        if self.model_config.quantize_te:
             freeze(text_encoder)
             flush()
 

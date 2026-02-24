@@ -142,8 +142,20 @@ class QwenImageModel(BaseModel):
         tokenizer = Qwen2Tokenizer.from_pretrained(
             base_model_path, subfolder="tokenizer", torch_dtype=dtype
         )
+
+        te_kwargs = {}
+        if self.model_config.quantize_te and self.model_config.qtype_te == "nf4":
+            self.print_and_status_update("Loading Text Encoder in 4-bit (nf4)")
+            te_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=dtype,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            te_kwargs["device_map"] = self.device_torch
+
         text_encoder = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            base_model_path, subfolder="text_encoder", torch_dtype=dtype
+            base_model_path, subfolder="text_encoder", torch_dtype=dtype, **te_kwargs
         )
 
         # remove the visual model as it is not needed for image generation
@@ -161,9 +173,11 @@ class QwenImageModel(BaseModel):
         text_encoder.to(self.device_torch, dtype=dtype)
         flush()
 
-        if self.model_config.quantize_te:
+        if self.model_config.quantize_te and self.model_config.qtype_te != "nf4":
             self.print_and_status_update("Quantizing Text Encoder")
             quantize(text_encoder, weights=get_qtype(self.model_config.qtype_te))
+        
+        if self.model_config.quantize_te:
             freeze(text_encoder)
             flush()
 
