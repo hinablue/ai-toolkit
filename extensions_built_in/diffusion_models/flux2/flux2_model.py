@@ -18,7 +18,7 @@ from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze, QTensor
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
 
-from transformers import AutoProcessor, Mistral3ForConditionalGeneration
+from transformers import AutoProcessor, Mistral3ForConditionalGeneration, BitsAndBytesConfig
 from .src.model import Flux2, Flux2Params
 from .src.pipeline import Flux2Pipeline
 from .src.autoencoder import AutoEncoder, AutoEncoderParams

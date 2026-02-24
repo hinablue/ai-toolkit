@@ -1,5 +1,5 @@
 from .flux2_model import Flux2Model
-from transformers import Qwen3ForCausalLM, Qwen2Tokenizer
+from transformers import Qwen3ForCausalLM, Qwen2Tokenizer, BitsAndBytesConfig
 from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype
 from toolkit.config_modules import ModelConfig

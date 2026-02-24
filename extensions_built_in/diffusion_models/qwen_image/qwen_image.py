@@ -28,6 +28,7 @@ from transformers import (
     Qwen2_5_VLForConditionalGeneration,
     Qwen2Tokenizer,
     Qwen2VLProcessor,
+    BitsAndBytesConfig
 )
 from tqdm import tqdm
 
