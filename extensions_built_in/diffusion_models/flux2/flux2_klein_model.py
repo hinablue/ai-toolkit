@@ -54,7 +54,6 @@ class Flux2KleinModel(Flux2Model):
         text_encoder = Qwen3ForCausalLM.from_pretrained(
             self.flux2_klein_te_path, torch_dtype=dtype, **te_kwargs
         )
-<<<<<<< HEAD
 
         flush()
 
@@ -63,11 +62,6 @@ class Flux2KleinModel(Flux2Model):
             quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
 
         if self.model_config.quantize_te:
-=======
-        if self.model_config.quantize_te:
-            self.print_and_status_update("Quantizing Qwen3")
-            quantize(text_encoder, weights=get_qtype(self.model_config.qtype_te))
->>>>>>> upstream/main
             freeze(text_encoder)
             flush()
         elif not self.model_config.low_vram:
