@@ -133,7 +133,7 @@ class BaseCaptioner(BaseExtensionProcess):
         # delete it if it already exists
         if os.path.exists(caption_file_path):
             os.remove(caption_file_path)
-        with open(caption_file_path, "w") as f:
+        with open(caption_file_path, "w", encoding="utf-8") as f:
             f.write(caption)
 
     def get_caption_for_file(self, file_path: str) -> str:
@@ -148,7 +148,7 @@ class BaseCaptioner(BaseExtensionProcess):
         for root, dirs, files in os.walk(self.caption_config.path_to_caption):
             for file in files:
                 if any(
-                    file.lower().endswith(f".{ext}")
+                    file.lower().endswith(f".{ext}") and not file.startswith(".")
                     for ext in self.caption_config.extensions
                 ):
                     full_path = os.path.join(root, file)
