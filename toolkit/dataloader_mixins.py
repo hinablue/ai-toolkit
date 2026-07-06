@@ -470,7 +470,7 @@ class AudioProcessingDTOMixin:
         except Exception as e:
             # if issue with libtorchcodec "Could not load libtorchcodec"
             raise Exception(f"** WARNING ** - Error Processing audio for {self.path}. Error: {e}")
-        
+
 
 class ImageProcessingDTOMixin:
     def load_and_process_video(
@@ -478,7 +478,7 @@ class ImageProcessingDTOMixin:
         transform: Union[None, transforms.Compose],
         only_load_latents=False
     ):
-        
+
         if self.augments is not None and len(self.augments) > 0:
             raise Exception('Augments not supported for videos')
 
@@ -487,9 +487,9 @@ class ImageProcessingDTOMixin:
 
         if not self.dataset_config.buckets:
             raise Exception('Buckets required for video processing')
-        
+
         do_audio = self.dataset_config.do_audio
-        
+
         try:
             # Use OpenCV to capture video frames
             cap = cv2.VideoCapture(self.path)
@@ -512,22 +512,22 @@ class ImageProcessingDTOMixin:
                 print_acc(f"  FPS: {video_fps}")
 
             frames_to_extract = []
-            
+
             if self.dataset_config.auto_frame_count:
                 # allow for any length video here but make sure it is temporally compressable.
                 vid_length_seconds = total_frames / video_fps
-                
+
                 desired_num_frames = int(vid_length_seconds * self.dataset_config.fps)
-                
+
                 # make sure it is divisible by temporal_compression
                 desired_num_frames = desired_num_frames // self.temporal_compression * self.temporal_compression
-                
+
                 # TODO, all models currently add a key frame, but future models may not, update here if this changes.
                 desired_num_frames += 1  # add one for the key frame that is always added
-                
+
                 self.num_frames = desired_num_frames
-                
-            
+
+
             # Always stretch/shrink to the requested number of frames if needed
             if self.dataset_config.shrink_video_to_frames or total_frames < self.num_frames:
                 # Distribute frames evenly across the entire video
@@ -540,7 +540,7 @@ class ImageProcessingDTOMixin:
 
                 # Calculate max consecutive frames we can extract at desired FPS
                 max_consecutive_frames = (total_frames // frame_interval)
-                
+
                 if max_consecutive_frames < self.num_frames:
                     # Not enough frames at desired FPS, so stretch instead
                     interval = max_frame_index / (self.num_frames - 1) if self.num_frames > 1 else 0
@@ -552,7 +552,7 @@ class ImageProcessingDTOMixin:
 
                     # Generate list of frames to extract
                     frames_to_extract = [start_frame + (i * frame_interval) for i in range(self.num_frames)]
-                    
+
             # Final safety check - ensure no frame exceeds max valid index
             frames_to_extract = [min(frame_idx, max_frame_index) for frame_idx in frames_to_extract]
 
@@ -668,9 +668,9 @@ class ImageProcessingDTOMixin:
                         target_duration = source_duration
 
                     waveform, sample_rate = torchaudio.load(self.path)  # [channels, samples]
-                    
+
                     waveform = waveform_to_stereo(waveform)  # Convert to stereo if not already
-                    
+
                     if self.dataset_config.audio_normalize:
                         peak = waveform.abs().amax()  # global peak across channels
                         eps = 1e-9
@@ -711,7 +711,7 @@ class ImageProcessingDTOMixin:
                 except Exception as e:
                     # if issue with libtorchcodec "Could not load libtorchcodec"
                     raise Exception(f"** WARNING ** - Error Processing audio for {self.path}. Error: {e}")
-            
+
             # Only log success in debug mode
             if hasattr(self.dataset_config, 'debug') and self.dataset_config.debug:
                 print_acc(f"Successfully loaded video with {len(frames)} frames: {self.path}")
@@ -1776,16 +1776,16 @@ class LatentCachingMixin:
                         first_frame_latent = self.sd.encode_images(first_frames).squeeze(0)
                         if to_disk:
                             state_dict['first_frame_latent'] = first_frame_latent.clone().detach().cpu()
-                    
+
                     # audio (video+audio models only — audio-only models already encoded above via encode_images)
                     if not self.is_audio_model and file_item.audio_data is not None:
                         audio_latent = self.sd.encode_audio([file_item.audio_data]).squeeze(0)
                         if to_disk:
                             state_dict['audio_latent'] = audio_latent.clone().detach().cpu()
-                    
+
                     if is_video:
                         state_dict['num_frames'] = torch.tensor(file_item.num_frames, dtype=torch.int32)
-                    
+
                     # save_latent
                     if to_disk:
                         # metadata
@@ -1899,13 +1899,7 @@ class TextEmbeddingCachingMixin:
                         self.sd.set_device_state_preset('cache_text_encoder')
                         did_move = True
 
-                    # Ensure caption is loaded before caching (this ensures trigger_word is included in caption)
-                    if file_item.caption is None:
-                        file_item.load_caption()
-
-                    if file_item.encode_control_in_text_embeddings:
-                        if file_item.control_path is None:
-                            raise Exception(f"Could not find a control image for {file_item.path} which is needed for this model")
+                    if file_item.encode_control_in_text_embeddings and file_item.control_path is not None:
                         ctrl_img_list = []
                         control_path_list = file_item.control_path
                         if not isinstance(file_item.control_path, list):
