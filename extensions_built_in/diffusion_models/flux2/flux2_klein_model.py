@@ -3,7 +3,6 @@ from transformers import Qwen3ForCausalLM, Qwen2Tokenizer, BitsAndBytesConfig
 from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype
 from toolkit.config_modules import ModelConfig
-from toolkit.memory_management.manager import MemoryManager
 from toolkit.basic import flush
 from .src.model import Klein9BParams, Klein4BParams
 
